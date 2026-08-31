@@ -17,6 +17,8 @@ knowing before pasting:
   (`export APPIP='1.2.3.4'`). Replace the contents, keep the quotes — unquoted `<...>` is
   redirection syntax and will error.
 - If a trailing `#` comment errors, run `setopt interactive_comments` once.
+- `$SSHKEY` is set in step 1 and used by every `ssh`/`scp` below, so run the steps in one
+  shell session (or re-export it).
 - The scripts in `tools/` declare `#!/usr/bin/env bash`, so they run under bash whatever your
   interactive shell is.
 
@@ -53,8 +55,25 @@ export MYIP=$(curl -s https://ifconfig.me)     # your current public address
 
 ## 1. SSH key
 
-```bash
-exo compute ssh-key register ${NAME}-key ~/.ssh/id_ed25519.pub
+A key dedicated to these servers — not your GitHub key. Different purpose, different blast
+radius: rotating one should never cost you access to the other.
+
+```zsh
+export SSHKEY=~/.ssh/exoscale_safelife
+[[ -f $SSHKEY ]] || ssh-keygen -t ed25519 -f $SSHKEY -C safelife-exoscale -N ''
+
+exo compute ssh-key register ${NAME}-key "${SSHKEY}.pub"
+```
+
+`-N ''` leaves it without a passphrase so the `scp`/`ssh` steps below do not stop to prompt.
+Add one whenever you like — `ssh-keygen -p -f $SSHKEY` — and load it with
+`ssh-add --apple-use-keychain $SSHKEY`.
+
+To reuse an existing key instead, quote the path: a filename containing a space
+(`~/.ssh/GitHub cargoo.pub`) breaks every unquoted command that touches it.
+
+```zsh
+export SSHKEY="$HOME/.ssh/GitHub cargoo"      # quotes are load-bearing here
 ```
 
 ## 2. Security group
@@ -130,20 +149,20 @@ exo dbaas update ${NAME}-db --zone $ZONE --pg-ip-filter ${MYIP}/32,${APPIP}/32
 
 ```bash
 # Deployment files
-scp deploy/docker-compose.yml deploy/Caddyfile ubuntu@$APPIP:/tmp/
-ssh ubuntu@$APPIP 'sudo mv /tmp/docker-compose.yml /tmp/Caddyfile /opt/safelife/'
+scp -i $SSHKEY deploy/docker-compose.yml deploy/Caddyfile ubuntu@$APPIP:/tmp/
+ssh -i $SSHKEY ubuntu@$APPIP 'sudo mv /tmp/docker-compose.yml /tmp/Caddyfile /opt/safelife/'
 
 # Image + site address
-ssh ubuntu@$APPIP 'sudo tee /opt/safelife/.env >/dev/null' <<'EOF'
+ssh -i $SSHKEY ubuntu@$APPIP 'sudo tee /opt/safelife/.env >/dev/null' <<'EOF'
 IMAGE=ghcr.io/chadgates/safelife-central-demo:latest
 SITE_ADDRESS=:80
 EOF
 
 # Database credentials — from step 3. Keep this file 0600.
-ssh ubuntu@$APPIP 'sudo tee /etc/safelife/app.env >/dev/null && sudo chmod 600 /etc/safelife/app.env' < deploy/app.env   # your filled-in copy
+ssh -i $SSHKEY ubuntu@$APPIP 'sudo tee /etc/safelife/app.env >/dev/null && sudo chmod 600 /etc/safelife/app.env' < deploy/app.env   # your filled-in copy
 
 # Pull and run
-ssh ubuntu@$APPIP 'cd /opt/safelife && sudo docker compose pull && sudo systemctl start safelife'
+ssh -i $SSHKEY ubuntu@$APPIP 'cd /opt/safelife && sudo docker compose pull && sudo systemctl start safelife'
 ```
 
 ### Registry authentication
@@ -157,7 +176,7 @@ production path, not a fallback. Do it before the `docker compose pull`:
 # shell history, and never visible in ps output on either machine.
 printf '%s' 'ghp_xxxxxxxxxxxxxxxxxxxx' > ~/.ghcr-token && chmod 600 ~/.ghcr-token
 
-ssh ubuntu@$APPIP 'sudo docker login ghcr.io -u x-access-token --password-stdin' < ~/.ghcr-token
+ssh -i $SSHKEY ubuntu@$APPIP 'sudo docker login ghcr.io -u x-access-token --password-stdin' < ~/.ghcr-token
 ```
 
 Four things that decide whether this works on the day:
@@ -211,7 +230,7 @@ open http://$APPIP                         # the Angular page, refreshing every 
 Watch the logs while you do it:
 
 ```bash
-ssh ubuntu@$APPIP 'sudo docker logs -f safelife-app'
+ssh -i $SSHKEY ubuntu@$APPIP 'sudo docker logs -f safelife-app'
 ```
 
 Two behaviours worth checking deliberately, because they are the ones that matter at
@@ -227,8 +246,8 @@ fleet scale:
 Point an A record at `$APPIP`, then:
 
 ```bash
-ssh ubuntu@$APPIP "sudo sed -i 's|SITE_ADDRESS=:80|SITE_ADDRESS=safelife.example.ch|' /opt/safelife/.env"
-ssh ubuntu@$APPIP 'cd /opt/safelife && sudo docker compose up -d'
+ssh -i $SSHKEY ubuntu@$APPIP "sudo sed -i 's|SITE_ADDRESS=:80|SITE_ADDRESS=safelife.example.ch|' /opt/safelife/.env"
+ssh -i $SSHKEY ubuntu@$APPIP 'cd /opt/safelife && sudo docker compose up -d'
 ```
 
 Caddy obtains and renews the certificate on its own. Nothing else changes — it is
