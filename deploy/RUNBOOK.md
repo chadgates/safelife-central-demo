@@ -1,7 +1,9 @@
 # Exoscale deployment runbook — SafeLife Central demo
 
-Everything below is copy-pasteable. Zone is `ch-gva-2` (Geneva) throughout; the other
-Swiss zone is `ch-dk-2`. Keep the database and the instance in the same zone.
+Everything below is copy-pasteable. Zone is `ch-dk-2` (Zurich, Equinix) throughout; the
+other Swiss zone is `ch-gva-2` (Geneva). Keep the database and the instance in the same
+zone — cross-zone traffic is neither free nor low-latency, and an Elastic IP can only
+attach to instances within its own zone.
 
 Prices are CHF/month excl. VAT, from Exoscale's published price list.
 
@@ -23,13 +25,13 @@ Add the Network Load Balancer (25.00) when you move to the production shape in s
 brew install exoscale/tap/cli
 
 exo config          # paste API key + secret from the Exoscale portal (IAM → Keys)
-exo zone            # sanity check: ch-gva-2 should be listed
+exo zone            # sanity check: ch-dk-2 should be listed
 ```
 
 Set some shell variables so the rest is copy-paste:
 
 ```bash
-export ZONE=ch-gva-2
+export ZONE=ch-dk-2
 export NAME=safelife
 export MYIP=$(curl -s https://ifconfig.me)     # your current public address
 ```
