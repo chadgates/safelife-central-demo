@@ -41,6 +41,13 @@ Built and run end to end on 30 August 2026 against PostgreSQL 17, on .NET 10 (LT
 | 100 concurrent sessions | all counted, all stored, back to 0 with no leak |
 | SPA + assets + fallback route | 200 |
 
+## Handing this to the developer
+
+[`PACKAGING.md`](PACKAGING.md) is the brief for whoever builds the real service: 24 numbered
+requirements covering the container, the configuration interface, the device listener and the
+database, plus the acceptance test we will run against their image. It is written to be
+dropped into their repository and handed to Claude Code directly.
+
 ## Repository layout
 
 ```
