@@ -120,7 +120,7 @@ ssh ubuntu@$APPIP 'sudo mv /tmp/docker-compose.yml /tmp/Caddyfile /opt/safelife/
 
 # Image + site address
 ssh ubuntu@$APPIP 'sudo tee /opt/safelife/.env >/dev/null' <<EOF
-IMAGE=ghcr.io/<your-github-owner>/<your-repo>:latest
+IMAGE=ghcr.io/chadgates/safelife-central-demo:latest
 SITE_ADDRESS=:80
 EOF
 
@@ -134,7 +134,7 @@ ssh ubuntu@$APPIP 'cd /opt/safelife && sudo docker compose pull && sudo systemct
 If the GHCR package is private, log in on the instance first:
 
 ```bash
-ssh ubuntu@$APPIP 'echo <GITHUB_PAT> | sudo docker login ghcr.io -u <github-user> --password-stdin'
+ssh ubuntu@$APPIP 'echo <GITHUB_PAT> | sudo docker login ghcr.io -u chadgates --password-stdin'
 ```
 
 Making the package public (GitHub → Packages → package settings → change visibility)

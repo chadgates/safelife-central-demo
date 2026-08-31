@@ -65,7 +65,8 @@ tools/
 ## Getting it running
 
 **1. Push this repo to GitHub.** The workflow builds on every push to `main` and publishes
-`ghcr.io/<owner>/<repo>:latest`. Make the package public (Packages → settings → visibility)
+`ghcr.io/chadgates/safelife-central-demo:latest`. Make the package public (Packages → settings →
+visibility)
 so the server can pull without credentials.
 
 **2. Follow [`deploy/RUNBOOK.md`](deploy/RUNBOOK.md).** About fifteen minutes, ~CHF 69/month
