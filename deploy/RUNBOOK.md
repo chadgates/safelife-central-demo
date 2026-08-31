@@ -268,17 +268,43 @@ $REPO/tools/hold-open.sh $APPIP 9770 30     # session stays open, "Open sessions
 $REPO/tools/hold-open.sh $APPIP 9770 400    # exceeds the 300s idle timeout: server hangs up
 ```
 
-## 8. A real hostname and HTTPS
+## 8. A hostname and HTTPS — including for the prototype
 
-Point an A record at `$APPIP`, then:
+Inbound SMS forces this step: Twilio delivers by POSTing to a URL, and it signs the exact URL
+it was configured with. So you need a name and a certificate before the messaging channels
+work — plain `:80` on an IP is enough for the device socket and the web UI, and nothing more.
 
-```bash
+### Getting a name for a prototype
+
+Let's Encrypt will only issue for a **real, publicly resolvable** domain. There is no
+certificate for a made-up name, so "dummy domain" means one of these:
+
+| Option | Cost | Verdict |
+|---|---|---|
+| **A cheap real domain** — `safelife-demo.ch` or a `.dev`/`.app` | ~CHF 10–15/year | **Recommended.** Also unlocks SendGrid domain authentication, which you will want anyway. One purchase solves two problems. |
+| **A subdomain of a domain you already control** | free | Just as good, if you can add a DNS record somewhere. |
+| **A free dynamic-DNS name** — `duckdns.org`, `sslip.io`, `nip.io` | free | Works, but thousands of people share the registered domain, and Let's Encrypt rate limits are *per registered domain*. Issuance fails unpredictably. Fine for a throwaway hour, not for a prototype you demo. |
+| **Self-signed / Caddy internal CA** | free | Browsers warn, and Twilio rejects untrusted certificates unless you disable SSL validation on the account. Do not build the habit. |
+
+Point an `A` record at the instance — or at the Elastic IP from step 10, which is the better
+choice since it survives the instance being replaced.
+
+### Switch it on
+
+```zsh
 ssh -i $SSHKEY ubuntu@$APPIP "sudo sed -i 's|SITE_ADDRESS=:80|SITE_ADDRESS=safelife.example.ch|' /opt/safelife/.env"
 ssh -i $SSHKEY ubuntu@$APPIP 'cd /opt/safelife && sudo docker compose up -d'
 ```
 
-Caddy obtains and renews the certificate on its own. Nothing else changes — it is
-already reverse-proxying to the app.
+Caddy obtains and renews the certificate itself, over HTTP-01, so the name must already
+resolve to this host and port 80 must stay open. Watch it happen:
+
+```zsh
+ssh -i $SSHKEY ubuntu@$APPIP 'sudo docker logs -f safelife-caddy'
+curl -sI https://safelife.example.ch | head -3
+```
+
+Then set `PUBLIC_BASE_URL` in `app.env` to the same name, scheme included — see section 9.
 
 ---
 
@@ -342,6 +368,42 @@ Static Proxy offers fixed egress IPs on eligible Editions, if you ever need an a
 
 **Nothing needs opening outbound.** Twilio and SendGrid API calls are ordinary outbound HTTPS,
 already permitted. Only 443 inbound matters, and it is already open from step 2.
+
+### Testing without sending anything real
+
+Both services have a sandbox, and both are worth using before a real number or a real
+recipient is involved.
+
+**Twilio Test Credentials.** A completely separate Test Account SID and Test Auth Token, found
+next to the live ones in the console. Requests are accepted and processed normally but nothing
+is sent and nothing is charged. Paired with **magic numbers** — `+15005550006` as a `From`
+simulates a successful send; others simulate specific failures. The two environments are
+entirely separate: numbers on your live account do not exist under test credentials.
+
+Drop them into the same variables — the application does not need to know:
+
+```
+TWILIO_ACCOUNT_SID=<TEST account sid>
+TWILIO_AUTH_TOKEN=<TEST auth token>
+TWILIO_FROM_NUMBER=+15005550006
+```
+
+Two limits to expect. Test credentials cover the **REST API only** — they cannot deliver an
+inbound webhook, so testing inbound SMS needs a real number on the live account. And on a
+**trial** account every recipient number must be verified first.
+
+**SendGrid.** 100 emails a day free, but only after a sender identity exists — you cannot send
+at all until then. **Single Sender Verification** verifies one address by clicking a link in
+it, which is enough for a prototype. **Domain Authentication** is the production answer and
+needs DNS records, which is the second reason to own a real domain. Scope the API key to
+*Mail Send* only.
+
+```
+SENDGRID_API_KEY=<key scoped to Mail Send>
+SENDGRID_FROM_EMAIL=<the address you verified>
+```
+
+Note the trial is 60 days from sign-up, then it needs a plan.
 
 ### Rotation
 

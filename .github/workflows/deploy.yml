@@ -1,0 +1,120 @@
+name: deploy
+
+# Run the deployment instead of typing exo/ssh commands by hand.
+#
+# Inert until three repository secrets exist (Settings -> Secrets and variables -> Actions):
+#   DEPLOY_HOST     the instance IP or hostname
+#   DEPLOY_SSH_KEY  the PRIVATE half of ~/.ssh/exoscale_safelife, whole file including headers
+#   DEPLOY_USER     optional, defaults to "ubuntu"
+#
+# This deploys the application. It does not create infrastructure - see deploy/RUNBOOK.md
+# for that, or move it to Terraform (README notes the trade-off).
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag to deploy (latest, or sha-<full-sha> for an immutable deploy)'
+        required: true
+        default: 'latest'
+      run_migrations:
+        description: 'Run the migration step before switching over'
+        type: boolean
+        default: true
+
+  # To deploy automatically after every successful image build, uncomment this. Off by
+  # default: an unattended deploy to the host the device fleet talks to should be a choice.
+  # workflow_run:
+  #   workflows: [build-and-push]
+  #   types: [completed]
+  #   branches: [main]
+
+concurrency:
+  group: deploy-production      # never let two deploys overlap
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production     # add required reviewers here to gate deploys
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the secrets are present
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          missing=0
+          [ -n "$HOST" ] || { echo "::error::DEPLOY_HOST secret is not set"; missing=1; }
+          [ -n "$KEY" ]  || { echo "::error::DEPLOY_SSH_KEY secret is not set"; missing=1; }
+          [ "$missing" -eq 0 ] || {
+            echo "::error::See the header of .github/workflows/deploy.yml for what to add."
+            exit 1
+          }
+
+      - name: Set up the SSH key
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+      - name: Deploy
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER || 'ubuntu' }}
+          IMAGE: ghcr.io/${{ github.repository }}:${{ inputs.tag }}
+          MIGRATE: ${{ inputs.run_migrations }}
+        run: |
+          set -euo pipefail
+          SSH="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15"
+
+          echo "Deploying $IMAGE to $HOST"
+
+          # Pin the tag on the host, so a reboot brings back the version we chose and not
+          # whatever "latest" happens to be by then.
+          $SSH "$USER@$HOST" "sudo sed -i 's|^IMAGE=.*|IMAGE=${IMAGE}|' /opt/safelife/.env"
+
+          $SSH "$USER@$HOST" "cd /opt/safelife && sudo docker compose pull app"
+
+          if [ "$MIGRATE" = "true" ]; then
+            # One-shot, before anything is swapped: a failed migration leaves the running
+            # version untouched and fails the deploy here.
+            $SSH "$USER@$HOST" "cd /opt/safelife && sudo docker compose run --rm app ./efbundle" \
+              || { echo "::error::Migration failed - the previous version is still serving"; exit 1; }
+          fi
+
+          $SSH "$USER@$HOST" "cd /opt/safelife && sudo docker compose up -d --remove-orphans"
+
+      - name: Verify
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 5 "http://${HOST}/api/health" >/dev/null 2>&1; then
+              echo "health ok after ${i}s"
+              curl -fsS "http://${HOST}/api/status" || true
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::/api/health did not come up within 30s"
+          exit 1
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Deploy"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Image | \`ghcr.io/${{ github.repository }}:${{ inputs.tag }}\` |"
+            echo "| Host | \`${{ secrets.DEPLOY_HOST != '' && 'configured' || 'NOT SET' }}\` |"
+            echo "| Migrations | ${{ inputs.run_migrations }} |"
+            echo "| Result | ${{ job.status }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -19,19 +19,22 @@ requirement below is unclear, that repository is the answer.
 
 Drop this file into your repository root and point Claude Code at it:
 
-> Read PACKAGING.md. Audit this repository against every requirement R1–R34 and produce a
+> Read PACKAGING.md. Audit this repository against every requirement R1–R33 and produce a
 > table of pass / fail / not-applicable with the file and line for each finding. Do not
 > change anything yet.
 
 Then, once you agree with its assessment:
 
 > Implement the failing requirements from PACKAGING.md. Start with the R1–R8 group
-> (container and configuration), then R9–R16 (the device listener), then R25–R34 (the
+> (container and configuration), then R9–R16 (the device listener), then R25–R33 (the
 > messaging channels). Show me the diff for each group before moving on.
 
 The requirements are numbered so you and Claude can refer to them precisely, and so our
 acceptance check (bottom of this file) maps one-to-one onto them. R1–R24 are the service
-itself; R25–R34 cover the Twilio SMS and SendGrid email channels.
+itself; R25–R33 cover the Twilio SMS and SendGrid email channels.
+
+Where a requirement reads like we are designing your application, we are not — say so and we
+will drop it. The test is whether it changes what the deployment has to do.
 
 ---
 
@@ -92,11 +95,17 @@ set but the `PG*` values.
 
 ---
 
-## 3. The device listener — where the real risk is
+## 3. The device listener — capacity, not design
 
-The devices open **raw TCP** sessions and hold them open for hours. Trial scale is ~100
-devices; other deployments run **~2000 devices per port**. Four of the requirements below sit
-right at that number, and each one is cheap now and painful to retrofit.
+How you parse the protocol and what you do with a message is entirely yours. What we care
+about is that the service fits the host we sized: the devices open **raw TCP** sessions and
+hold them open for hours, at ~100 devices for the trial and **~2000 per port** in real
+deployments.
+
+So read R9–R18 as a **capacity budget**: 2000 concurrent sessions inside roughly 300 MB of
+working set, surviving a whole-fleet reconnect. The specific techniques are how our reference
+implementation hits that budget, and you are free to hit it another way — but four of them sit
+right at the 2000 mark, which is why they are called out rather than left implicit.
 
 **R9 — Bind `0.0.0.0:$SAFELIFE_TCP_PORT`.** Not localhost.
 
@@ -110,8 +119,8 @@ everything.
 
 **R12 — Frame messages properly.** One read is not one message: a message can arrive split
 across two reads, and two messages can arrive in one read. Use `System.IO.Pipelines`
-(`PipeReader` + `SequenceReader`) or an equivalent buffered framer. Confirm with TWIG whether
-the delimiter is newline, a length prefix, or something else — the demo assumes newline.
+(`PipeReader` + `SequenceReader`) or an equivalent buffered framer. The protocol itself is
+yours; the demo assumes newline delimiters purely as an example.
 
 **R13 — Explicit accept backlog.** `TcpListener.Start()` defaults to 512. A power cut or
 carrier blip reconnects the whole fleet in one burst and the tail gets connection-refused.
@@ -225,12 +234,10 @@ parties on the far side of the internet. Timeouts, retries with backoff, and a c
 API response. Where it helps to show configuration state, report *presence* only — the demo's
 `/api/status` shows `"sms": "configured (api key)"` and never a value.
 
-**R33 — Idempotency on inbound.** Twilio retries on timeout or a non-2xx response, so the same
-message can arrive more than once. Deduplicate on `MessageSid`.
-
-**R34 — Store the phone number as an identity, not a display string.** E.164, normalised on the
-way in. And say clearly how a device maps to a number, because the SMS path has no TCP session
-to attribute a message to — this is a data-model question we should agree together.
+**R33 — Survive Twilio's retries.** Twilio re-sends on timeout or a non-2xx response, so the
+same webhook can arrive more than once. How you deduplicate is yours — `MessageSid` is the
+obvious key. We mention it only because we configure the webhook, and therefore cause the
+retries.
 
 ---
 
@@ -320,25 +327,24 @@ test and fail in the field.
 
 ---
 
-## 8. Open questions we need answered with you
+## 8. What we need to know to configure the deployment
 
-These are not packaging decisions but they shape the code, so raise them early:
+Not design questions — these are the values we type into infrastructure. Everything else about
+how the service works is yours.
 
-- **The wire protocol.** Message delimiter, maximum message size, character encoding, and
-  whether the device expects an application-level acknowledgement or treats the TCP write as
-  delivery.
-- **Keep-alive interval**, which sets the idle timeout in R14.
-- **Reconnect behaviour** on the device side: immediate retry, backoff, buffered messages? It
-  decides whether a host restart loses data or merely delays it.
-- **Message rate and payload size per device.** Our storage sizing currently assumes ~200
-  bytes every 30 seconds; at 2000 devices that is roughly 1.2 GB and 5.8 million rows a day,
-  which needs daily partitioning and a retention policy.
-- **Alarm versus telemetry.** The demo drops the oldest queued rows if the database is
-  unreachable — the honest failure mode for telemetry and the wrong one for alarms. If any
-  message is an alarm, we need to agree what "delivered" means before it is built.
-- **When SMS takes over from TCP.** What counts as a dead session, how long we wait, whether
-  the device or the platform decides, and whether a message can arrive on both paths and need
-  deduplicating. This is the actual design of the backup channel, and it is not a packaging
-  question.
-- **How a phone number maps to a device** (R34). The SMS path has no TCP session to attribute
-  a message to, so the identity has to come from somewhere.
+| We need | Because it sets |
+|---|---|
+| **Device port** | the Exoscale security group rule and `SAFELIFE_TCP_PORT` |
+| **Device source IP ranges**, if TWIG will give them | whether port 9770 is open to the world or narrowed |
+| **Device keep-alive interval** | `SAFELIFE_IDLE_TIMEOUT_SECONDS`, which must be comfortably longer |
+| **Peak concurrent sessions** per deployment | instance size, `nofile`, accept backlog, `SAFELIFE_MAX_CONNECTIONS` |
+| **Message rate and stored size per device** | the database tier, disk, and retention policy |
+| **Whether anything is written to disk** | whether we need object storage — the container filesystem is ephemeral |
+| **Webhook paths** for inbound SMS and status | what we configure on the Twilio number, and it makes TLS mandatory |
+| **Migration command**, verbatim | the deploy step |
+| **Any env vars beyond R8 and R25** | the env file we write on the host |
+
+Our current sizing assumes ~200 bytes per message every 30 seconds per device, and 2000
+devices per port. At that rate it is roughly 1.2 GB and 5.8 million rows a day, which needs
+daily partitioning and a retention policy. If your real numbers differ by much, tell us —
+that is a database tier decision, not a code one.
