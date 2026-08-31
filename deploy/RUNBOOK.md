@@ -133,14 +133,57 @@ ssh ubuntu@$APPIP 'sudo tee /etc/safelife/app.env >/dev/null && sudo chmod 600 /
 ssh ubuntu@$APPIP 'cd /opt/safelife && sudo docker compose pull && sudo systemctl start safelife'
 ```
 
-If the GHCR package is private, log in on the instance first:
+### Registry authentication
+
+**This demo's package is public, so the pull above works with no credentials.** The real
+image will not be — the developer's repository will be private — so this step is the
+production path, not a fallback. Do it before the `docker compose pull`:
 
 ```bash
-ssh ubuntu@$APPIP 'echo <GITHUB_PAT> | sudo docker login ghcr.io -u chadgates --password-stdin'
+# Keep the token in a local file, mode 600 - never on a command line, never in
+# shell history, and never visible in ps output on either machine.
+printf '%s' 'ghp_xxxxxxxxxxxxxxxxxxxx' > ~/.ghcr-token && chmod 600 ~/.ghcr-token
+
+ssh ubuntu@$APPIP 'sudo docker login ghcr.io -u x-access-token --password-stdin' < ~/.ghcr-token
 ```
 
-Making the package public (GitHub → Packages → package settings → change visibility)
-removes that step entirely, which is the right call for a demo.
+Four things that decide whether this works on the day:
+
+**Use a classic PAT.** GitHub Packages authenticates only with a *personal access token
+(classic)*. Fine-grained tokens do not work — they have no `read:packages` scope at all and
+the pull fails with 403. Create it at Settings → Developer settings → Tokens (classic).
+
+**Scope it to `read:packages` and nothing else.** The token sits on a server. It should not
+be able to touch code, and it should not be anyone's personal token — issue a dedicated one
+for this host.
+
+**`-u x-access-token` rather than a username.** It works for both personal and
+organisation-owned packages, so the same command survives the image moving from the
+developer's account into a company org.
+
+**Mind the expiry.** A classic PAT with an expiry date will make a future
+`docker compose pull` fail — quietly, because the running container keeps serving until
+something restarts it. Either issue it without an expiry (acceptable only because the scope
+is read-only) or diarise the rotation.
+
+The credential persists in `/root/.docker/config.json`, so reboots and
+`systemctl restart safelife` keep working without logging in again. Note it is stored
+**base64-encoded, not encrypted** — anyone with root on this box can read it, which is the
+reason for the narrow scope above.
+
+### Getting access to the developer's package
+
+If the image lives in the developer's account or org rather than yours, a token alone is not
+enough — the package has to grant your account read access. This is the step most likely to
+block the first real deployment, so raise it early:
+
+- **Their side:** package → Package settings → Manage access → add your account (or a shared
+  machine account) with *Read*.
+- **Or:** they issue a `read:packages` token from an account that already has access, and you
+  use that. Simpler to arrange, harder to rotate cleanly.
+- **Ask which it will be as part of the commercial agreement**, alongside who owns the
+  registry namespace long term. Moving the image later means re-pointing `IMAGE=` on every
+  host and re-issuing tokens.
 
 ## 7. Prove it works
 
