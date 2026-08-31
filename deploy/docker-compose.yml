@@ -1,0 +1,52 @@
+# Both containers run on the host network on purpose.
+#
+#  - The device listener must see the real client IP. With Docker's default bridge and
+#    published ports, the userland proxy can rewrite the source address to the bridge
+#    gateway (172.17.0.1), which destroys per-device logging and any IP-based check.
+#  - Caddy then reaches the app on 127.0.0.1:8080 with no container DNS involved.
+#
+# Consequence: "ports:" is not used and must not be - host networking publishes directly.
+
+services:
+  app:
+    image: ${IMAGE}
+    container_name: safelife-app
+    restart: always
+    network_mode: host
+    env_file:
+      - /etc/safelife/app.env
+    ulimits:
+      # One descriptor per device session. Docker's default soft limit is often 1024,
+      # which starts refusing connections at roughly a thousand devices.
+      nofile:
+        soft: 65535
+        hard: 65535
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  caddy:
+    image: caddy:2
+    container_name: safelife-caddy
+    restart: always
+    network_mode: host
+    environment:
+      # A hostname here (safelife.example.ch) gets an automatic Let's Encrypt
+      # certificate. Leave it unset and Caddy serves plain HTTP on :80, which is
+      # what you want before DNS exists.
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  caddy_data:
+  caddy_config:

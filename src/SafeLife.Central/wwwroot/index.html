@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en" ng-app="safelife">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hello SafeLife Central</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="vendor/angular.min.js"></script>
+  <script src="app.js"></script>
+</head>
+<body ng-controller="MessagesController as vm">
+
+  <header class="mast">
+    <h1>Hello SafeLife Central</h1>
+    <p class="sub">Messages arriving on TCP port <strong>{{ vm.status.tcpPort || '...' }}</strong>,
+       newest first. The list refreshes every {{ vm.pollSeconds }}s and always shows the last 100.</p>
+  </header>
+
+  <section class="stats">
+    <div class="stat">
+      <span class="k">Stored</span>
+      <span class="v">{{ vm.status.stored === undefined ? '—' : vm.status.stored }}</span>
+    </div>
+    <div class="stat">
+      <span class="k">Open sessions</span>
+      <span class="v">{{ vm.status.activeSessions === undefined ? '—' : vm.status.activeSessions }}</span>
+    </div>
+    <div class="stat">
+      <span class="k">Showing</span>
+      <span class="v">{{ vm.messages.length }}</span>
+    </div>
+    <div class="stat" ng-class="{ bad: vm.error }">
+      <span class="k">Backend</span>
+      <span class="v">{{ vm.error ? 'unreachable' : 'ok' }}</span>
+    </div>
+  </section>
+
+  <p class="err" ng-if="vm.error">{{ vm.error }}</p>
+
+  <p class="empty" ng-if="!vm.error && vm.messages.length === 0">
+    Nothing yet. Send one:
+    <code>printf 'first contact\n' | nc &lt;host&gt; {{ vm.status.tcpPort || 9770 }}</code>
+  </p>
+
+  <table class="messages" ng-if="vm.messages.length">
+    <thead>
+      <tr><th class="c-id">#</th><th class="c-time">Received</th><th class="c-src">Source</th><th>Message</th></tr>
+    </thead>
+    <tbody>
+      <tr ng-repeat="m in vm.messages track by m.id">
+        <td class="c-id">{{ m.id }}</td>
+        <td class="c-time">{{ m.receivedAt | date:'yyyy-MM-dd HH:mm:ss' }}</td>
+        <td class="c-src">{{ m.source }}</td>
+        <td class="body">{{ m.body }}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <footer>
+    SafeLife Central demo &middot; one container, one .NET process: TCP listener + API + this page.
+  </footer>
+
+</body>
+</html>

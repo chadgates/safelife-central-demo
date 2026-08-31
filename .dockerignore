@@ -1,0 +1,7 @@
+**/bin/
+**/obj/
+.git/
+.github/
+deploy/
+tools/
+*.md

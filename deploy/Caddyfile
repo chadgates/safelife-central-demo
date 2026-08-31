@@ -1,0 +1,13 @@
+# SITE_ADDRESS comes from docker-compose. A bare ":80" serves plain HTTP; a hostname
+# makes Caddy fetch and renew a Let's Encrypt certificate on its own.
+{$SITE_ADDRESS} {
+	encode gzip
+
+	# The app serves both the API and the Angular page from one Kestrel port.
+	reverse_proxy 127.0.0.1:8080
+
+	log {
+		output stdout
+		format console
+	}
+}

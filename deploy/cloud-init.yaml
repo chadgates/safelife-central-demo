@@ -1,0 +1,76 @@
+#cloud-config
+# Passed to: exo compute instance create --cloud-init deploy/cloud-init.yaml
+# Brings the box up with Docker installed, the firewall closed except for what we
+# need, and the kernel tuned for a few thousand long-lived TCP sessions.
+
+package_update: true
+package_upgrade: true
+
+packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - ufw
+  - netcat-openbsd
+
+write_files:
+  # A mass reconnect (carrier blip, power cut) arrives as one burst of SYNs.
+  # The listener asks for a backlog of 1024; the kernel must allow it.
+  - path: /etc/sysctl.d/60-safelife.conf
+    content: |
+      net.core.somaxconn = 4096
+      net.ipv4.tcp_max_syn_backlog = 4096
+      net.ipv4.tcp_fin_timeout = 30
+      net.ipv4.tcp_keepalive_time = 120
+      fs.file-max = 200000
+
+  - path: /etc/systemd/system/safelife.service
+    content: |
+      [Unit]
+      Description=SafeLife Central
+      Requires=docker.service
+      After=docker.service network-online.target
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      WorkingDirectory=/opt/safelife
+      ExecStart=/usr/bin/docker compose up -d --remove-orphans
+      ExecStop=/usr/bin/docker compose down
+      TimeoutStartSec=0
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  # Docker from the official repository - the distro package lags badly.
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list
+  - apt-get update
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  - systemctl enable --now docker
+
+  - sysctl --system
+
+  # Exoscale security groups already filter at the edge; ufw is the second layer.
+  # Narrow 9770 to the device source ranges as soon as TWIG provides them.
+  - ufw default deny incoming
+  - ufw default allow outgoing
+  - ufw allow 22/tcp
+  - ufw allow 80/tcp
+  - ufw allow 443/tcp
+  - ufw allow 9770/tcp
+  - ufw --force enable
+
+  - mkdir -p /opt/safelife /etc/safelife
+  - chmod 750 /etc/safelife
+  - systemctl daemon-reload
+  - systemctl enable safelife.service
+
+  # Unattended security updates, since nobody is going to log in to patch this.
+  - apt-get install -y unattended-upgrades
+  - dpkg-reconfigure -f noninteractive unattended-upgrades
+
+final_message: "SafeLife host ready. Copy deploy/ to /opt/safelife, write /etc/safelife/app.env, then: systemctl start safelife"
