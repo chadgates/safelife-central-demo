@@ -12,3 +12,10 @@ deploy/app.env
 
 # macOS
 .DS_Store
+
+# Terraform
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.*
+infra/terraform.tfvars
+infra/*.tfplan

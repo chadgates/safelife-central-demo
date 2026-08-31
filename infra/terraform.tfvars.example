@@ -1,0 +1,14 @@
+# Copy to terraform.tfvars and edit. terraform.tfvars is gitignored.
+
+# Required. Run: echo "$(curl -s https://ifconfig.me)/32"
+admin_cidr = "203.0.113.10/32"
+
+zone = "ch-dk-2"
+
+# Cheapest path to start: run Postgres as a container on the instance and skip the
+# managed service. Saves CHF 41.84/month; you own backups and it dies with the instance.
+#   managed_database = false
+#   instance_type    = "standard.medium"   # 4 GiB, so the database has somewhere to live
+
+# Narrow this the moment TWIG give you their source ranges.
+# device_source_cidrs = ["198.51.100.0/24"]

@@ -85,9 +85,10 @@ pick a tag. It pins the tag on the host, runs migrations as a one-shot before sw
 brings the container up and checks `/api/health`. It is inert until three secrets exist; the
 header of [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) lists them.
 
-For the infrastructure itself, the CLI steps are the quick path; Exoscale also has an official
-Terraform provider, which is the better answer once the shape stops changing — it makes the
-instance, security group, database and Elastic IP reproducible instead of remembered.
+For the infrastructure itself, [`infra/`](infra/) has the Terraform: security group, Elastic
+IP, instance and managed Postgres, plus a `managed_database = false` switch that drops the
+monthly cost from CHF 58.64 to 33.60 by running Postgres as a container instead. The `exo`
+commands in the runbook remain the readable explanation of what each resource is for.
 
 **3. Send it something.**
 
