@@ -7,6 +7,19 @@ attach to instances within its own zone.
 
 Prices are CHF/month excl. VAT, from Exoscale's published price list.
 
+**Shell:** every block is written for **zsh** (the macOS default). Two zsh habits worth
+knowing before pasting:
+
+- zsh treats `?`, `*` and `[` in *unquoted* arguments as globs and aborts with
+  `no matches found` rather than passing them through. Nothing below trips it, but quote any
+  URL with a query string — `gh api 'user/packages?package_type=container'`, not bare.
+- Where a value has to be pasted by hand, the placeholder is shown **quoted**
+  (`export APPIP='1.2.3.4'`). Replace the contents, keep the quotes — unquoted `<...>` is
+  redirection syntax and will error.
+- If a trailing `#` comment errors, run `setopt interactive_comments` once.
+- The scripts in `tools/` declare `#!/usr/bin/env bash`, so they run under bash whatever your
+  interactive shell is.
+
 | Resource | Choice | CHF/mo |
 |---|---|---|
 | Compute instance | `standard.small` — 2 vCPU / 2 GiB | 16.80 |
@@ -99,7 +112,7 @@ exo compute instance create ${NAME}-app \
   --cloud-init deploy/cloud-init.yaml
 
 exo compute instance show ${NAME}-app --zone $ZONE     # note the public IP
-export APPIP=<the public IP>
+export APPIP='1.2.3.4'                                 # paste it here, keep the quotes
 ```
 
 Cloud-init installs Docker, applies the firewall and the TCP sysctls, and registers a
@@ -121,7 +134,7 @@ scp deploy/docker-compose.yml deploy/Caddyfile ubuntu@$APPIP:/tmp/
 ssh ubuntu@$APPIP 'sudo mv /tmp/docker-compose.yml /tmp/Caddyfile /opt/safelife/'
 
 # Image + site address
-ssh ubuntu@$APPIP 'sudo tee /opt/safelife/.env >/dev/null' <<EOF
+ssh ubuntu@$APPIP 'sudo tee /opt/safelife/.env >/dev/null' <<'EOF'
 IMAGE=ghcr.io/chadgates/safelife-central-demo:latest
 SITE_ADDRESS=:80
 EOF
@@ -244,7 +257,7 @@ exo compute elastic-ip create --zone $ZONE \
   --healthcheck-strikes-fail 3 \
   --healthcheck-strikes-ok 2
 
-export EIP=<the address it printed>
+export EIP='203.0.113.10'      # the address it printed, keep the quotes
 exo compute instance elastic-ip attach ${NAME}-app $EIP --zone $ZONE
 ```
 
