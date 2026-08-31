@@ -3,7 +3,12 @@ obj/
 .vs/
 .idea/
 *.user
+# Real credentials. The .example templates are tracked; these are not.
 deploy/.env
+deploy/app.env
+*.env
+!*.env.example
+.ghcr-token
 
 # macOS
 .DS_Store

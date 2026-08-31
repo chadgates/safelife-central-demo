@@ -17,8 +17,8 @@ knowing before pasting:
   (`export APPIP='1.2.3.4'`). Replace the contents, keep the quotes — unquoted `<...>` is
   redirection syntax and will error.
 - If a trailing `#` comment errors, run `setopt interactive_comments` once.
-- `$SSHKEY` is set in step 1 and used by every `ssh`/`scp` below, so run the steps in one
-  shell session (or re-export it).
+- `$REPO`, `$ZONE`, `$NAME`, `$MYIP` are set in step 0 and `$SSHKEY` in step 1; every later
+  step uses them, so run the whole runbook in one shell session (or re-export them).
 - The scripts in `tools/` declare `#!/usr/bin/env bash`, so they run under bash whatever your
   interactive shell is.
 
@@ -45,11 +45,16 @@ exo zone            # sanity check: ch-dk-2 should be listed
 
 Set some shell variables so the rest is copy-paste:
 
-```bash
+```zsh
+export REPO=$(git rev-parse --show-toplevel)   # repo root, from any directory
 export ZONE=ch-dk-2
 export NAME=safelife
 export MYIP=$(curl -s https://ifconfig.me)     # your current public address
 ```
+
+Every file path below is written as `$REPO/...` on purpose. This document lives in
+`deploy/`, so a terminal opened next to it is **not** the repo root — paths relative to the
+root would silently resolve to `deploy/deploy/...` and fail.
 
 ---
 
@@ -70,10 +75,10 @@ Add one whenever you like — `ssh-keygen -p -f $SSHKEY` — and load it with
 `ssh-add --apple-use-keychain $SSHKEY`.
 
 To reuse an existing key instead, quote the path: a filename containing a space
-(`~/.ssh/GitHub cargoo.pub`) breaks every unquoted command that touches it.
+(`~/.ssh/some_key_name.pub`) breaks every unquoted command that touches it.
 
 ```zsh
-export SSHKEY="$HOME/.ssh/GitHub cargoo"      # quotes are load-bearing here
+export SSHKEY="$HOME/.ssh/some_key_name"      # quotes are load-bearing here
 ```
 
 ## 2. Security group
@@ -128,7 +133,7 @@ exo compute instance create ${NAME}-app \
   --disk-size 20 \
   --ssh-key ${NAME}-key \
   --security-group ${NAME}-sg \
-  --cloud-init deploy/cloud-init.yaml
+  --cloud-init $REPO/deploy/cloud-init.yaml
 
 exo compute instance show ${NAME}-app --zone $ZONE     # note the public IP
 export APPIP='1.2.3.4'                                 # paste it here, keep the quotes
@@ -149,7 +154,7 @@ exo dbaas update ${NAME}-db --zone $ZONE --pg-ip-filter ${MYIP}/32,${APPIP}/32
 
 ```bash
 # Deployment files
-scp -i $SSHKEY deploy/docker-compose.yml deploy/Caddyfile ubuntu@$APPIP:/tmp/
+scp -i $SSHKEY $REPO/deploy/docker-compose.yml $REPO/deploy/Caddyfile ubuntu@$APPIP:/tmp/
 ssh -i $SSHKEY ubuntu@$APPIP 'sudo mv /tmp/docker-compose.yml /tmp/Caddyfile /opt/safelife/'
 
 # Image + site address
@@ -158,8 +163,13 @@ IMAGE=ghcr.io/chadgates/safelife-central-demo:latest
 SITE_ADDRESS=:80
 EOF
 
-# Database credentials — from step 3. Keep this file 0600.
-ssh -i $SSHKEY ubuntu@$APPIP 'sudo tee /etc/safelife/app.env >/dev/null && sudo chmod 600 /etc/safelife/app.env' < deploy/app.env   # your filled-in copy
+# Database credentials. Make your local copy from the template first and fill in the
+# values that "exo dbaas show" printed in step 3. app.env is gitignored; app.env.example
+# is the tracked template - never put real credentials in the latter.
+cp $REPO/deploy/app.env.example $REPO/deploy/app.env
+${EDITOR:-nano} $REPO/deploy/app.env
+
+ssh -i $SSHKEY ubuntu@$APPIP 'sudo tee /etc/safelife/app.env >/dev/null && sudo chmod 600 /etc/safelife/app.env' < $REPO/deploy/app.env
 
 # Pull and run
 ssh -i $SSHKEY ubuntu@$APPIP 'cd /opt/safelife && sudo docker compose pull && sudo systemctl start safelife'
@@ -223,7 +233,7 @@ block the first real deployment, so raise it early:
 curl -s http://$APPIP/api/health           # {"status":"ok"}
 curl -s http://$APPIP/api/status           # greeting, tcpPort, activeSessions, stored
 
-./tools/send-messages.sh $APPIP 9770 5     # five messages over TCP
+$REPO/tools/send-messages.sh $APPIP 9770 5     # five messages over TCP
 open http://$APPIP                         # the Angular page, refreshing every 2s
 ```
 
@@ -237,8 +247,8 @@ Two behaviours worth checking deliberately, because they are the ones that matte
 fleet scale:
 
 ```bash
-./tools/hold-open.sh $APPIP 9770 30     # session stays open, "Open sessions" shows 1
-./tools/hold-open.sh $APPIP 9770 400    # exceeds the 300s idle timeout: server hangs up
+$REPO/tools/hold-open.sh $APPIP 9770 30     # session stays open, "Open sessions" shows 1
+$REPO/tools/hold-open.sh $APPIP 9770 400    # exceeds the 300s idle timeout: server hangs up
 ```
 
 ## 8. A real hostname and HTTPS
@@ -295,7 +305,7 @@ exo compute instance-pool create ${NAME}-pool \
   --instance-type standard.small \
   --template "Linux Ubuntu 24.04 LTS 64-bit" \
   --disk-size 20 --ssh-key ${NAME}-key \
-  --security-group ${NAME}-sg --cloud-init deploy/cloud-init.yaml
+  --security-group ${NAME}-sg --cloud-init $REPO/deploy/cloud-init.yaml
 
 exo compute load-balancer create ${NAME}-nlb --zone $ZONE
 exo compute load-balancer service add ${NAME}-nlb twig \
