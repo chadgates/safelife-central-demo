@@ -49,7 +49,7 @@ Set some shell variables so the rest is copy-paste:
 export REPO=$(git rev-parse --show-toplevel)   # repo root, from any directory
 export ZONE=ch-dk-2
 export NAME=safelife
-export MYIP=$(curl -s https://ifconfig.me)     # your current public address
+export MYIP=$(curl -fsS --max-time 10 https://ifconfig.me || curl -fsS --max-time 10 https://api.ipify.org)
 ```
 
 Every file path below is written as `$REPO/...` on purpose. This document lives in
@@ -143,6 +143,23 @@ Cloud-init installs Docker, applies the firewall and the TCP sysctls, and regist
 `safelife` systemd unit. Give it two or three minutes.
 
 ## 5. Let the database accept the instance
+
+**Checkpoint first.** An empty variable does not error — it silently expands to nothing, so
+`${APPIP}/32` becomes `/32` and Exoscale rejects it with
+`Invalid 'user_config' ip_filter value '/32'`, which says nothing about the real cause. Check
+before you send it:
+
+```zsh
+bad=0
+for v in REPO ZONE NAME MYIP APPIP SSHKEY; do
+  if [[ -n ${(P)v} ]]; then printf "  %-7s = %s\n" $v ${(P)v}
+  else printf "  %-7s = (EMPTY - set it before continuing)\n" $v; bad=1; fi
+done
+(( bad )) && echo "  -> fix the empty ones first" || echo "  -> all set"
+```
+
+`APPIP` is the usual offender: it is the one value you paste by hand, in step 4. If you
+opened a new terminal since step 0, re-export everything — none of it survives a new shell.
 
 The DBaaS IP filter currently allows only your laptop.
 
