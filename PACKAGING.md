@@ -19,18 +19,19 @@ requirement below is unclear, that repository is the answer.
 
 Drop this file into your repository root and point Claude Code at it:
 
-> Read PACKAGING.md. Audit this repository against every requirement R1–R24 and produce a
+> Read PACKAGING.md. Audit this repository against every requirement R1–R34 and produce a
 > table of pass / fail / not-applicable with the file and line for each finding. Do not
 > change anything yet.
 
 Then, once you agree with its assessment:
 
 > Implement the failing requirements from PACKAGING.md. Start with the R1–R8 group
-> (container and configuration), then R9–R16 (the device listener). Show me the diff for
-> each group before moving on.
+> (container and configuration), then R9–R16 (the device listener), then R25–R34 (the
+> messaging channels). Show me the diff for each group before moving on.
 
 The requirements are numbered so you and Claude can refer to them precisely, and so our
-acceptance check (bottom of this file) maps one-to-one onto them.
+acceptance check (bottom of this file) maps one-to-one onto them. R1–R24 are the service
+itself; R25–R34 cover the Twilio SMS and SendGrid email channels.
 
 ---
 
@@ -169,6 +170,70 @@ the database, so a database blip does not get the container killed and restarted
 
 ---
 
+## 4b. Messaging channels — Twilio SMS and SendGrid email
+
+SMS is the backup path when a device's TCP session is dead; email is a notification channel.
+The deployment already carries the variables below — read them, do not invent new names for
+the same things.
+
+**R25 — These exact variable names.**
+
+| Variable | Meaning |
+|---|---|
+| `PUBLIC_BASE_URL` | the address the outside world reaches us on, scheme included |
+| `TWILIO_ACCOUNT_SID` | account SID |
+| `TWILIO_AUTH_TOKEN` | account auth token — required for webhook signature validation |
+| `TWILIO_API_KEY_SID` / `TWILIO_API_KEY_SECRET` | preferred credentials for outbound REST calls |
+| `TWILIO_MESSAGING_SERVICE_SID` | messaging service, preferred over a fixed number |
+| `TWILIO_FROM_NUMBER` | E.164 sender, used only when no messaging service is set |
+| `TWILIO_VALIDATE_SIGNATURES` | `true` everywhere except a local dev box |
+| `SENDGRID_API_KEY` | SendGrid key, scoped to Mail Send only |
+| `SENDGRID_FROM_EMAIL` / `SENDGRID_FROM_NAME` | sender identity |
+
+**R26 — Prefer API keys for sending, but still require the auth token.** Inbound webhook
+signatures are HMAC-SHA1 keyed on the *account auth token* specifically — an API key cannot
+verify them. So: API key for the REST client where present, auth token for validation. Fall
+back to account SID + auth token for sending if no API key is configured.
+
+**R27 — Validate every inbound webhook signature.** Use the Twilio SDK's own validator, never
+a hand-rolled HMAC. Reject with 403 on failure. Twilio publishes no webhook source IP ranges —
+they are deliberately dynamic — so the signature is the *only* access control on that endpoint.
+Honour `TWILIO_VALIDATE_SIGNATURES` so it can be disabled locally, and make the application log
+loudly at startup when it is off.
+
+**R28 — Compute the signature against `PUBLIC_BASE_URL`, not the incoming request.** We
+terminate TLS at Caddy, so the application sees `http://localhost:8080` and would build the
+wrong URL — `https` versus `http` alone breaks validation. Either construct the validation URL
+from `PUBLIC_BASE_URL` + path + query, or configure
+`ForwardedHeadersOptions` (`XForwardedProto`, `XForwardedHost`) and verify the result matches.
+This is the single most common inbound-webhook failure.
+
+**R29 — Inbound webhook path: `POST /api/sms/inbound`.** Form-encoded, as Twilio sends it.
+Respond `204` or valid TwiML quickly — Twilio times out, and slow handlers become retries.
+Do the real work off the request path (queue it, as with the TCP ingest in R21). Tell us if you
+need a different path so we can confirm it before the number is configured.
+
+**R30 — Delivery status webhook: `POST /api/sms/status`,** same validation rules. Without it
+you cannot distinguish "sent" from "delivered", which matters when SMS is the fallback for a
+device that is already unreachable.
+
+**R31 — Treat both channels as unavailable at any moment.** Twilio and SendGrid are third
+parties on the far side of the internet. Timeouts, retries with backoff, and a circuit breaker
+— and never block a device session or an HTTP request on an outbound message send.
+
+**R32 — Never log or echo the credentials.** No secrets in log lines, error messages, or any
+API response. Where it helps to show configuration state, report *presence* only — the demo's
+`/api/status` shows `"sms": "configured (api key)"` and never a value.
+
+**R33 — Idempotency on inbound.** Twilio retries on timeout or a non-2xx response, so the same
+message can arrive more than once. Deduplicate on `MessageSid`.
+
+**R34 — Store the phone number as an identity, not a display string.** E.164, normalised on the
+way in. And say clearly how a device maps to a number, because the SMS path has no TCP session
+to attribute a message to — this is a data-model question we should agree together.
+
+---
+
 ## 5. What you deliver
 
 1. **A repository** containing the source, the `Dockerfile`, and a CI workflow that builds
@@ -189,6 +254,9 @@ the database, so a database blip does not get the container killed and restarted
 5. **A way to send a synthetic device message** — a script or documented byte sequence — so
    we can prove the path end to end without real hardware.
 6. **Migration command**, exactly as we should invoke it (R22).
+7. **The webhook paths** you settle on (R29, R30), so we can configure the Twilio number and
+   confirm TLS is in place before the first message is sent to it. Inbound SMS makes a real
+   hostname with a certificate mandatory rather than optional.
 
 ## 6. What we provide
 
@@ -229,6 +297,21 @@ curl -s localhost:8080/api/messages     # R19/R21 - the message was stored
 for i in $(seq 1 200); do { printf 'session-%03d\n' $i; sleep 8; } | nc localhost 9770 & done
 
 # R14 - a session idle past the timeout is dropped by the server, not left half-open
+
+# R25/R32 - credentials arrive and are never echoed. Presence only in the response.
+docker rm -f app >/dev/null; docker run -d --name app \
+  -e PGHOST=host.docker.internal -e PGDATABASE=postgres -e PGUSER=postgres -e PGPASSWORD=dev \
+  -e PGSSLMODE=Disable -e PGTRUSTSERVERCERT=false \
+  -e PUBLIC_BASE_URL=https://example.test \
+  -e TWILIO_ACCOUNT_SID=ACtest -e TWILIO_AUTH_TOKEN=tok_secret \
+  -e SENDGRID_API_KEY=SG.secret \
+  -p 8080:8080 -p 9770:9770 "$IMAGE"
+sleep 8
+curl -s localhost:8080/api/status | grep -c 'tok_secret\|SG.secret'   # must be 0
+
+# R27/R28 - an unsigned POST to the webhook must be rejected
+curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost:8080/api/sms/inbound \
+  -d 'From=%2B41000000000&Body=test&MessageSid=SMtest'                 # must be 403
 ```
 
 If the 150-message burst loses messages, R12 is not implemented. If the 200 concurrent
@@ -253,3 +336,9 @@ These are not packaging decisions but they shape the code, so raise them early:
 - **Alarm versus telemetry.** The demo drops the oldest queued rows if the database is
   unreachable — the honest failure mode for telemetry and the wrong one for alarms. If any
   message is an alarm, we need to agree what "delivered" means before it is built.
+- **When SMS takes over from TCP.** What counts as a dead session, how long we wait, whether
+  the device or the platform decides, and whether a message can arrive on both paths and need
+  deduplicating. This is the actual design of the backup channel, and it is not a packaging
+  question.
+- **How a phone number maps to a device** (R34). The SMS path has no TCP session to attribute
+  a message to, so the identity has to come from somewhere.

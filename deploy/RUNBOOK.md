@@ -29,7 +29,7 @@ knowing before pasting:
 | Elastic IP | one, reserved to the organisation | 10.00 |
 | **Total** | | **68.64** |
 
-Add the Network Load Balancer (25.00) when you move to the production shape in step 9.
+Add the Network Load Balancer (25.00) when you move to the production shape in step 10.
 
 ---
 
@@ -282,7 +282,79 @@ already reverse-proxying to the app.
 
 ---
 
-## 9. The production shape: an address that outlives the machine
+## 9. Messaging channels: Twilio SMS and SendGrid email
+
+SMS is the backup path when a device's TCP session is dead, and email is a notification
+channel. Neither needs new infrastructure — but **inbound SMS changes one thing from optional
+to mandatory: a real hostname with TLS.** Twilio delivers inbound messages by POSTing to a URL
+you configure, so step 8 is a prerequisite, not a nice-to-have.
+
+### Store the credentials
+
+They live in the same 0600 env file as the database password — never in the image, never in
+the repository.
+
+```zsh
+# Fill in the Twilio and SendGrid blocks in your local copy.
+${EDITOR:-nano} $REPO/deploy/app.env
+
+# Push it and restart. app.env is read at container start, so a restart is required.
+ssh -i $SSHKEY ubuntu@$APPIP 'sudo tee /etc/safelife/app.env >/dev/null && sudo chmod 600 /etc/safelife/app.env' < $REPO/deploy/app.env
+ssh -i $SSHKEY ubuntu@$APPIP 'cd /opt/safelife && sudo docker compose up -d --force-recreate app'
+```
+
+Confirm the container actually received them — the status endpoint reports *presence only* and
+never the values themselves:
+
+```zsh
+curl -s https://safelife.example.ch/api/status | python3 -m json.tool
+```
+
+```json
+"channels": {
+  "tcp": "listening",
+  "sms": "configured (api key)",
+  "smsSignatureValidation": "on",
+  "email": "configured"
+}
+```
+
+`"not configured"` means the variable never reached the process — almost always a missing
+restart or a typo in the env file, not a Twilio problem.
+
+### Four things that will otherwise cost you a day
+
+**The auth token is not optional, even if you use API keys.** Inbound webhook signatures are
+HMAC-SHA1 keyed on the *account auth token* specifically. API keys are the better choice for
+outbound calls because they can be revoked individually — so in practice you set both:
+`TWILIO_API_KEY_SID`/`SECRET` for sending, `TWILIO_AUTH_TOKEN` for verifying.
+
+**`PUBLIC_BASE_URL` must match the Twilio console exactly.** Twilio signs the precise URL it
+was configured with. Behind Caddy the application sees `http://localhost:8080`, so if it
+computes the signature from the request it sees, validation fails every time — `https` versus
+`http` alone is enough to break it. Hence the explicit variable. Character-for-character:
+trailing slashes matter.
+
+**You cannot firewall the webhook by IP.** Twilio does not publish webhook source ranges —
+they are deliberately dynamic across their cloud. The signature *is* the access control, which
+is why `TWILIO_VALIDATE_SIGNATURES=false` must never reach a deployed environment. (Twilio
+Static Proxy offers fixed egress IPs on eligible Editions, if you ever need an allowlist.)
+
+**Nothing needs opening outbound.** Twilio and SendGrid API calls are ordinary outbound HTTPS,
+already permitted. Only 443 inbound matters, and it is already open from step 2.
+
+### Rotation
+
+Both credentials are long-lived and sit on a host. Rotate by creating the new credential in
+the Twilio or SendGrid console first, updating `app.env`, recreating the container, confirming
+`/api/status`, and only then revoking the old one — in that order, so a mistake never takes the
+channel down. This is the strongest argument for API keys over the account auth token on the
+sending path: revoking the auth token breaks everything at once, including signature
+validation.
+
+---
+
+## 10. The production shape: an address that outlives the machine
 
 Everything above puts the device port on the *instance's* public IP. That address dies
 with the instance, which is unacceptable once the address is written into device

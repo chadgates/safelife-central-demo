@@ -27,6 +27,22 @@ public sealed class AppOptions
 
     public string ConnectionString { get; init; } = "";
 
+    /// <summary>
+    /// Public address the outside world reaches us on. Twilio signs the exact URL it was
+    /// configured with, and behind Caddy the app only sees http://localhost:8080 - so
+    /// webhook signature validation needs this told to it explicitly.
+    /// </summary>
+    public string PublicBaseUrl { get; init; } = "";
+
+    /// <summary>
+    /// Whether each optional channel has credentials present. Presence only - this app is a
+    /// dummy and sends nothing. Deliberately never exposes the values themselves.
+    /// </summary>
+    public bool SmsConfigured { get; init; }
+    public bool SmsUsesApiKey { get; init; }
+    public bool SmsSignatureValidation { get; init; }
+    public bool EmailConfigured { get; init; }
+
     public static AppOptions FromEnvironment()
     {
         static string Env(string key, string fallback = "") =>
@@ -54,8 +70,24 @@ public sealed class AppOptions
             // Deliberately well under the ~20-connection limit of entry-tier managed Postgres.
             $"Maximum Pool Size={EnvInt("PGMAXPOOL", 8)};Timeout=10;Command Timeout=30";
 
+        // Twilio: an account SID plus either the auth token or an API key pair.
+        // The auth token is separately required for inbound webhook signature validation,
+        // which is HMAC-SHA1 keyed on the token specifically - an API key will not do.
+        var twilioSid = Env("TWILIO_ACCOUNT_SID");
+        var twilioToken = Env("TWILIO_AUTH_TOKEN");
+        var twilioKeySid = Env("TWILIO_API_KEY_SID");
+        var twilioKeySecret = Env("TWILIO_API_KEY_SECRET");
+        var hasApiKey = twilioKeySid.Length > 0 && twilioKeySecret.Length > 0;
+
         return new AppOptions
         {
+            PublicBaseUrl = Env("PUBLIC_BASE_URL"),
+            SmsConfigured = twilioSid.Length > 0 && (twilioToken.Length > 0 || hasApiKey),
+            SmsUsesApiKey = hasApiKey,
+            SmsSignatureValidation =
+                Env("TWILIO_VALIDATE_SIGNATURES", "true").Equals("true", StringComparison.OrdinalIgnoreCase),
+            EmailConfigured = Env("SENDGRID_API_KEY").Length > 0,
+
             TcpPort = EnvInt("SAFELIFE_TCP_PORT", 9770),
             HttpPort = EnvInt("SAFELIFE_HTTP_PORT", 8080),
             IdleTimeout = TimeSpan.FromSeconds(EnvInt("SAFELIFE_IDLE_TIMEOUT_SECONDS", 300)),

@@ -57,6 +57,17 @@ app.MapGet("/api/status", async (MessageStore s, TcpIngestService tcp, AppOption
         tcpPort = o.TcpPort,
         activeSessions = tcp.ActiveConnections,
         stored = await s.CountAsync(ct),
+        publicBaseUrl = o.PublicBaseUrl.Length > 0 ? o.PublicBaseUrl : "(not set)",
+        // Presence of credentials, never the credentials. This endpoint is unauthenticated.
+        channels = new
+        {
+            tcp = "listening",
+            sms = o.SmsConfigured
+                ? (o.SmsUsesApiKey ? "configured (api key)" : "configured (auth token)")
+                : "not configured",
+            smsSignatureValidation = o.SmsSignatureValidation ? "on" : "OFF - do not deploy like this",
+            email = o.EmailConfigured ? "configured" : "not configured",
+        },
         utc = DateTimeOffset.UtcNow,
     }));
 
