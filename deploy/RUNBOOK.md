@@ -58,7 +58,68 @@ root would silently resolve to `deploy/deploy/...` and fail.
 
 ---
 
+## Two ways to create the infrastructure
+
+Steps 1–5 create the ssh key, security group, Elastic IP, instance and database. There are
+two routes, and they produce the same thing:
+
+| | **Route A — Terraform** | **Route B — `exo` commands** |
+|---|---|---|
+| Where | [`$REPO/infra`](../infra/) | steps 1–5 below |
+| Reproducible | yes — destroy and rebuild identically | no — it is whatever you typed |
+| Best for | anything you intend to keep, or rebuild | reading, and one-off experiments |
+
+**Route A is the one to use.** Route B stays in this document because it explains what each
+resource is *for*, one command at a time — which is worth reading once even if you never run it.
+
+Either way, **step 6 onwards is the same** and the two routes hand it the same variables.
+
+### Route A — Terraform
+
+```zsh
+export EXOSCALE_API_KEY='EXO...'        # IAM → Keys
+export EXOSCALE_API_SECRET='...'
+
+cd $REPO/infra
+cp terraform.tfvars.example terraform.tfvars
+${EDITOR:-nano} terraform.tfvars         # admin_cidr is required: echo "$MYIP/32"
+
+terraform init
+terraform plan                           # read it before approving
+terraform apply
+```
+
+Then hand the outputs to the rest of this runbook — these are the same variables steps 6–9
+expect, so nothing downstream changes:
+
+```zsh
+export SSHKEY=~/.ssh/exoscale_safelife
+export APPIP=$(terraform output -raw instance_ip)      # for ssh and scp
+export EIP=$(terraform output -raw elastic_ip)         # the address TWIG gets
+
+# The database half of the env file, already filled in.
+terraform output -raw app_env > $REPO/deploy/app.env
+chmod 600 $REPO/deploy/app.env
+
+cd $REPO
+```
+
+That covers steps 1–5 completely, including the database IP filter that step 5 does by hand
+and the Elastic IP that step 10 creates manually. **Skip to [step 6](#6-configure-and-start).**
+
+The Terraform also carries the cheaper option: `managed_database = false` runs Postgres as a
+container beside the app instead of the managed service, taking the monthly cost from CHF
+58.64 to 33.60. See [`infra/README.md`](../infra/README.md) for what you give up.
+
+### Route B — `exo` commands
+
+Continue with step 1 below.
+
+---
+
 ## 1. SSH key
+
+> **Route B only.** Terraform did this — skip to step 6.
 
 A key dedicated to these servers — not your GitHub key. Different purpose, different blast
 radius: rotating one should never cost you access to the other.
@@ -82,6 +143,8 @@ export SSHKEY="$HOME/.ssh/some_key_name"      # quotes are load-bearing here
 ```
 
 ## 2. Security group
+
+> **Route B only.** Terraform did this — skip to step 6.
 
 The edge filter. Port 9770 is the device listener — open it to the world only until
 TWIG give you their source ranges, then narrow it.
@@ -108,6 +171,8 @@ exo compute security-group rule add ${NAME}-sg \
 
 ## 3. Managed Postgres
 
+> **Route B only.** Terraform did this — skip to step 6.
+
 ```bash
 exo dbaas create pg hobbyist-2 ${NAME}-db --zone $ZONE --pg-ip-filter ${MYIP}/32
 ```
@@ -124,6 +189,8 @@ exo dbaas show ${NAME}-db --zone $ZONE --uri     # full postgres:// URI
 > single most common first-run failure with any managed Postgres.
 
 ## 4. Instance
+
+> **Route B only.** Terraform did this — skip to step 6.
 
 ```bash
 exo compute instance create ${NAME}-app \
@@ -144,7 +211,9 @@ Cloud-init installs Docker, applies the firewall and the TCP sysctls, and regist
 
 ## 5. Let the database accept the instance
 
-**Checkpoint first.** An empty variable does not error — it silently expands to nothing, so
+> **Route B only.** Terraform did this — skip to step 6.
+
+**Checkpoint — worth running on either route.** An empty variable does not error — it silently expands to nothing, so
 `${APPIP}/32` becomes `/32` and Exoscale rejects it with
 `Invalid 'user_config' ip_filter value '/32'`, which says nothing about the real cause. Check
 before you send it:
@@ -180,10 +249,16 @@ IMAGE=ghcr.io/chadgates/safelife-central-demo:latest
 SITE_ADDRESS=:80
 EOF
 
-# Database credentials. Make your local copy from the template first and fill in the
-# values that "exo dbaas show" printed in step 3. app.env is gitignored; app.env.example
-# is the tracked template - never put real credentials in the latter.
-cp $REPO/deploy/app.env.example $REPO/deploy/app.env
+# Database credentials.
+#
+# Route A (Terraform): app.env already exists, written by "terraform output -raw app_env".
+#   Do NOT run the cp below - it would overwrite it. Append the Twilio and SendGrid blocks
+#   from app.env.example when you get to step 9.
+#
+# Route B (exo): create it from the template and paste in what "exo dbaas show" printed
+#   in step 3. app.env is gitignored; app.env.example is the tracked template, so never put
+#   real credentials in that one.
+[[ -f $REPO/deploy/app.env ]] || cp $REPO/deploy/app.env.example $REPO/deploy/app.env
 ${EDITOR:-nano} $REPO/deploy/app.env
 
 ssh -i $SSHKEY ubuntu@$APPIP 'sudo tee /etc/safelife/app.env >/dev/null && sudo chmod 600 /etc/safelife/app.env' < $REPO/deploy/app.env
@@ -475,6 +550,15 @@ very expensive wrong answer.
 ---
 
 ## Teardown
+
+If you used Terraform, that is the whole teardown — and it removes everything it made,
+which is the main reason to have used it:
+
+```zsh
+cd $REPO/infra && terraform destroy
+```
+
+Otherwise, by hand:
 
 ```bash
 exo compute instance delete ${NAME}-app --zone $ZONE
