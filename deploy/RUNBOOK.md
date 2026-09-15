@@ -29,6 +29,9 @@ knowing before pasting:
 | Elastic IP | one, reserved to the organisation | 10.00 |
 | **Total** | | **68.64** |
 
+The Elastic IP is created in step 4b. Skip it and the total is 58.64 — but then the device
+endpoint dies with the instance, which is the one address you cannot change later.
+
 Add the Network Load Balancer (25.00) when you move to the production shape in step 10.
 
 ---
@@ -50,6 +53,7 @@ export REPO=$(git rev-parse --show-toplevel)   # repo root, from any directory
 export ZONE=ch-dk-2
 export NAME=safelife
 export MYIP=$(curl -fsS --max-time 10 https://ifconfig.me || curl -fsS --max-time 10 https://api.ipify.org)
+export DEVICE_PORT=9770
 ```
 
 Every file path below is written as `$REPO/...` on purpose. This document lives in
@@ -60,8 +64,8 @@ root would silently resolve to `deploy/deploy/...` and fail.
 
 ## Two ways to create the infrastructure
 
-Steps 1–5 create the ssh key, security group, Elastic IP, instance and database. There are
-two routes, and they produce the same thing:
+Steps 1–5 create the ssh key, security group, instance, database and the reserved address.
+There are two routes:
 
 | | **Route A — Terraform** | **Route B — `exo` commands** |
 |---|---|---|
@@ -208,6 +212,43 @@ export APPIP='1.2.3.4'                                 # paste it here, keep the
 
 Cloud-init installs Docker, applies the firewall and the TCP sysctls, and registers a
 `safelife` systemd unit. Give it two or three minutes.
+
+## 4b. Reserve the address the devices will use
+
+> **Route B only.** Terraform did this — skip to step 5.
+
+Do this **before anyone is given an address**, not later. The instance's own public IP dies
+with the instance; an Elastic IP is created for your organisation and stays until you delete
+it, so a rebuilt instance keeps the same endpoint.
+
+DNS covers the browser side — `sos.safelife.ch` can be repointed at will — but **devices are
+configured with a literal IP**, and that is the one thing you cannot change afterwards.
+
+```zsh
+# "Managed": Exoscale health-checks the backend and needs no configuration inside the VM.
+exo compute elastic-ip create --zone $ZONE \
+  --healthcheck-mode tcp \
+  --healthcheck-port $DEVICE_PORT \
+  --healthcheck-interval 10 \
+  --healthcheck-timeout 5 \
+  --healthcheck-strikes-fail 3 \
+  --healthcheck-strikes-ok 2
+
+export EIP='203.0.113.10'        # the address it printed, keep the quotes
+exo compute instance elastic-ip attach ${NAME}-app $EIP --zone $ZONE
+```
+
+Point DNS at `$EIP`, and give TWIG `$EIP` — never `$APPIP`.
+
+One ordering quirk to expect: a managed EIP only forwards traffic to a *healthy* backend, and
+the healthcheck is the device port. So the container has to be running before anything —
+including Caddy's certificate challenge on port 80 — reaches the instance through the EIP. If
+a certificate will not issue, check the app is up first.
+
+Already deployed without one? Creating and attaching it now is non-disruptive: the instance
+keeps its own address, and simply gains a second one.
+
+---
 
 ## 5. Let the database accept the instance
 
