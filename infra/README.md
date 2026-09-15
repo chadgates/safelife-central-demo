@@ -17,6 +17,18 @@ Terraform creates the **infrastructure**. Deploying a new image is the
 | `exoscale_compute_instance` | Ubuntu 24.04, cloud-init from `../deploy/cloud-init.yaml`, EIP attached |
 | `exoscale_database` | Postgres, IP-filtered to you and the instance. Optional — see below |
 
+## Install Terraform or OpenTofu first
+
+`brew install terraform` does not work - the formula left homebrew-core when HashiCorp moved
+to the BUSL licence.
+
+```zsh
+brew install opentofu                                        # command: tofu
+brew tap hashicorp/tap && brew install hashicorp/tap/terraform   # command: terraform
+```
+
+Either works; the commands below are interchangeable between `terraform` and `tofu`.
+
 ## Run it
 
 ```zsh
@@ -79,8 +91,16 @@ person or CI runs this, move it to Exoscale Object Storage — the S3 backend bl
 
 ## Verified
 
-The provider is not installed here, so `terraform validate` has not been run against this
-configuration. What *has* been checked: every resource type, data source and attribute used
-was cross-checked against the provider's published schema
-(`exoscale/terraform-provider-exoscale` docs) — 8 types, 0 undocumented attributes.
-Run `terraform validate` yourself before the first apply.
+Validated with **OpenTofu 1.12.6** against **exoscale provider 0.72.0**:
+
+```
+tofu init -backend=false   ->  initialized
+tofu validate              ->  Success! The configuration is valid.
+tofu fmt -check            ->  clean
+```
+
+Every resource type, data source and attribute was also cross-checked against the provider's
+published schema — 8 types, 0 undocumented attributes.
+
+Not yet run: `tofu plan` against a real account, which is the first thing that talks to the
+Exoscale API. Do that before the first apply.

@@ -1,4 +1,4 @@
-resource "exoscale_database" "pg" {
+resource "exoscale_dbaas" "pg" {
   count = var.managed_database ? 1 : 0
 
   zone = var.zone
@@ -30,9 +30,9 @@ resource "exoscale_database" "pg" {
 data "exoscale_database_uri" "pg" {
   count = var.managed_database ? 1 : 0
 
-  name = exoscale_database.pg[0].name
+  name = exoscale_dbaas.pg[0].name
   type = "pg"
   zone = var.zone
 
-  depends_on = [exoscale_database.pg]
+  depends_on = [exoscale_dbaas.pg]
 }

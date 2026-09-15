@@ -38,13 +38,32 @@ Add the Network Load Balancer (25.00) when you move to the production shape in s
 
 ## 0. Prerequisites
 
-```bash
+```zsh
 # macOS
 brew install exoscale/tap/cli
 
 exo config          # paste API key + secret from the Exoscale portal (IAM → Keys)
 exo zone            # sanity check: ch-dk-2 should be listed
 ```
+
+For Route A you also need Terraform or OpenTofu. **`brew install terraform` does not work** —
+HashiCorp's licence change removed it from homebrew-core, and brew unhelpfully suggests
+`terraformer` instead. Two working options:
+
+```zsh
+# OpenTofu - one command, no tap, MPL licensed. The command is `tofu`.
+brew install opentofu
+
+# or HashiCorp Terraform, which needs its own tap. The command is `terraform`.
+brew tap hashicorp/tap && brew install hashicorp/tap/terraform
+```
+
+They read the same `.tf` files and take the same subcommands, so every `terraform ...` below
+works as `tofu ...`. The Exoscale provider is published to both registries (identical
+versions), so either is fine. `infra/` was validated with OpenTofu 1.12.6 and provider 0.72.0.
+
+If your organisation cares about the BUSL licence Terraform moved to in 2023, OpenTofu is the
+one to pick.
 
 Set some shell variables so the rest is copy-paste:
 
@@ -88,7 +107,7 @@ cd $REPO/infra
 cp terraform.tfvars.example terraform.tfvars
 ${EDITOR:-nano} terraform.tfvars         # admin_cidr is required: echo "$MYIP/32"
 
-terraform init
+terraform init                           # or: tofu init
 terraform plan                           # read it before approving
 terraform apply
 ```
