@@ -94,15 +94,20 @@ jobs:
           HOST: ${{ secrets.DEPLOY_HOST }}
         run: |
           set -euo pipefail
-          for i in $(seq 1 30); do
-            if curl -fsS --max-time 5 "http://${HOST}/api/health" >/dev/null 2>&1; then
-              echo "health ok after ${i}s"
-              curl -fsS "http://${HOST}/api/status" || true
-              exit 0
-            fi
-            sleep 1
+          # Prefer https once a hostname and certificate exist; fall back to http while the
+          # deployment is still reachable only by IP.
+          for scheme in https http; do
+            for i in $(seq 1 20); do
+              if curl -fsS --max-time 5 "${scheme}://${HOST}/api/health" >/dev/null 2>&1; then
+                echo "health ok over ${scheme} after ${i}s"
+                curl -fsS "${scheme}://${HOST}/api/status" || true
+                exit 0
+              fi
+              sleep 1
+            done
+            echo "no answer over ${scheme}, trying next"
           done
-          echo "::error::/api/health did not come up within 30s"
+          echo "::error::/api/health did not answer over https or http"
           exit 1
 
       - name: Summary
