@@ -9,6 +9,17 @@ resource "exoscale_dbaas" "pg" {
   maintenance_dow  = "sunday"
   maintenance_time = "03:00:00"
 
+  # DBaaS provisioning takes minutes, and the service is briefly unreadable after the
+  # create call is accepted - a read in that window returns 404 and fails the apply with
+  # "Unable to read database service pg ... resource not found", leaving the service
+  # created but absent from state. A generous create window rides through it.
+  timeouts {
+    create = "20m"
+    read   = "5m"
+    update = "20m"
+    delete = "10m"
+  }
+
   # Refuses to destroy while true. Flip it deliberately before a teardown.
   termination_protection = false
 

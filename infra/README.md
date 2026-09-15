@@ -72,6 +72,36 @@ With `managed_database = false` no database resource is created and `app_env` po
 volume, and a nightly `pg_dump` to Object Storage (CHF 0.0198/GiB — pennies). Perfectly
 reasonable for a prototype; add the managed service back before real devices depend on it.
 
+## If the database apply fails with "resource not found"
+
+```
+Error: Client Error
+  with exoscale_dbaas.pg[0]
+  Unable to read database service pg, got error:
+  Get ".../v2/dbaas-postgres/safelife-db": resource not found
+```
+
+The create call was accepted but the service was not readable yet, so the apply failed and
+**the resource was never written to state** — while very likely existing on Exoscale's side.
+Everything else applied fine. Check which:
+
+```zsh
+exo dbaas list --zone ch-dk-2
+```
+
+**If `safelife-db` is listed**, adopt it rather than recreating it. Note the quotes — zsh
+treats the `[0]` as a glob and will abort with `no matches found` without them:
+
+```zsh
+tofu import 'exoscale_dbaas.pg[0]' safelife-db@ch-dk-2
+tofu plan          # expect "No changes"
+```
+
+**If it is not listed**, just `tofu apply` again.
+
+The `timeouts` block on the resource widens the create window to 20 minutes, which should stop
+this recurring.
+
 ## State holds secrets
 
 `terraform.tfstate` contains the database password. It is gitignored. The moment a second
