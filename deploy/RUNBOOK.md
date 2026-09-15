@@ -95,6 +95,13 @@ There are two routes:
 **Route A is the one to use.** Route B stays in this document because it explains what each
 resource is *for*, one command at a time — which is worth reading once even if you never run it.
 
+**If you already built the stack with Route B, do not simply run `tofu apply`.** Terraform
+knows nothing about resources it did not create, and several names are unique per account —
+the ssh key, the security group and the database service — so the apply fails partway and
+leaves you with half a stack. Either tear the old one down first (see Teardown), give the new
+one a different `name` in `terraform.tfvars` and build it alongside, or `tofu import` each
+existing resource into state.
+
 Either way, **step 6 onwards is the same** and the two routes hand it the same variables.
 
 ### Route A — Terraform
@@ -618,13 +625,26 @@ which is the main reason to have used it:
 cd $REPO/infra && terraform destroy
 ```
 
-Otherwise, by hand:
+Otherwise, by hand. **Order matters** — a security group cannot be deleted while an instance
+uses it, and the Elastic IP must be detached first:
 
-```bash
-exo compute instance delete ${NAME}-app --zone $ZONE
+```zsh
+exo compute instance delete ${NAME}-app --zone $ZONE          # detaches the EIP with it
 exo dbaas delete ${NAME}-db --zone $ZONE
-exo compute elastic-ip delete $EIP --zone $ZONE
+exo compute elastic-ip delete $EIP --zone $ZONE               # skip if you never made one
 exo compute security-group delete ${NAME}-sg
+exo compute ssh-key delete ${NAME}-key                        # easy to forget
+```
+
+Confirm nothing is left, because anything that survives will collide by name if you later
+build the same stack with Terraform:
+
+```zsh
+exo compute instance list --zone $ZONE
+exo dbaas list --zone $ZONE
+exo compute elastic-ip list --zone $ZONE
+exo compute security-group list
+exo compute ssh-key list
 ```
 
 Billing is hourly, so a demo left running over a weekend costs a couple of francs.
