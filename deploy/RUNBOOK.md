@@ -606,9 +606,63 @@ inbound webhook, so testing inbound SMS needs a real number on the live account.
 
 **SendGrid.** 100 emails a day free, but only after a sender identity exists — you cannot send
 at all until then. **Single Sender Verification** verifies one address by clicking a link in
-it, which is enough for a prototype. **Domain Authentication** is the production answer and
-needs DNS records, which is the second reason to own a real domain. Scope the API key to
+it. **Domain Authentication** publishes DKIM CNAMEs on your domain. Scope the API key to
 *Mail Send* only.
+
+Single Sender gets you *sending*; it does not get you *delivered*. If anyone is meant to read
+these mails, do Domain Authentication from the start — see below.
+
+### Deliverability: why the mail lands in quarantine
+
+Microsoft 365 and Google weigh authentication heavily, and a brand-new sending domain starts
+with no reputation. Four things to get right, in order of impact:
+
+**1. Domain Authentication, with automated security on.** This publishes `s1._domainkey` and
+`s2._domainkey` CNAMEs so mail is DKIM-signed as *your* domain, and — importantly — a custom
+return-path (`emNNNN.yourdomain`) so the envelope sender is SendGrid-controlled and passes SPF.
+Confirm SendGrid's UI actually says **Verified**; the CNAMEs existing is not the same thing.
+
+**2. Do not break your existing SPF.** Check what you already publish:
+
+```zsh
+dig +short TXT yourdomain.ch | grep spf
+dig +short TXT _dmarc.yourdomain.ch
+```
+
+If the record uses `redirect=` (common with shared hosts) it **cannot be extended** — a
+`redirect=` modifier means "use that record instead of this one", so appending an include does
+nothing. To add a sender you must rewrite it as includes:
+
+```
+v=spf1 include:spf.yourhost.ch include:sendgrid.net -all
+```
+
+With a custom return path you should not need to touch the apex SPF at all, which is the
+safer outcome — a wrong edit here breaks mail from your normal mail host too.
+
+**3. Turn click tracking off for transactional mail**, or set up link branding. Untracked
+links keep your own domain; SendGrid's default rewrites them to a sendgrid.net host, and a
+message whose links point somewhere other than the From domain is a well-known spam signal.
+
+**4. Give DMARC somewhere to report.** `p=none` alone tells you nothing. Add `rua=` and you get
+per-source pass/fail data:
+
+```
+v=DMARC1; p=none; rua=mailto:dmarc@yourdomain.ch; fo=1
+```
+
+### When something is already quarantined
+
+Read the headers before changing anything — they say exactly why:
+
+- `Authentication-Results:` — look for `spf=`, `dkim=`, `dmarc=`. A `dkim=pass` whose `d=`
+  matches your domain means authentication is fine and the problem is reputation or content.
+- `X-Forefront-Antispam-Report:` — Microsoft's own verdict. `CAT:` gives the category
+  (`SPM` spam, `BULK`, `PHSH` phishing), and `SCL:` the confidence score.
+
+If authentication passes, it is reputation: release the message and **report it as not junk**,
+which trains both the tenant and Microsoft. A tenant allow-list entry works as a stopgap, but
+treat it as a plaster — it only covers your own organisation, not the customer's.
 
 ```
 SENDGRID_API_KEY=<key scoped to Mail Send>
