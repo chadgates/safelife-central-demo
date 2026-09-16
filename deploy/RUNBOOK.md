@@ -439,8 +439,48 @@ certificate for a made-up name, so "dummy domain" means one of these:
 | **A free dynamic-DNS name** — `duckdns.org`, `sslip.io`, `nip.io` | free | Works, but thousands of people share the registered domain, and Let's Encrypt rate limits are *per registered domain*. Issuance fails unpredictably. Fine for a throwaway hour, not for a prototype you demo. |
 | **Self-signed / Caddy internal CA** | free | Browsers warn, and Twilio rejects untrusted certificates unless you disable SSL validation on the account. Do not build the habit. |
 
-Point an `A` record at the instance — or at the Elastic IP from step 10, which is the better
-choice since it survives the instance being replaced.
+### Create the record — point it at the Elastic IP
+
+```zsh
+$TF output -raw elastic_ip        # or: exo compute elastic-ip list --zone $ZONE
+```
+
+```
+Type  Name   Value                TTL
+A     sos    <the elastic ip>     300
+```
+
+The **Elastic IP**, not the instance address. The instance address dies with the instance; the
+EIP reattaches to a replacement, and it is already the device endpoint, so DNS and TWIG stay on
+one address.
+
+### Two DNS traps that cost an afternoon
+
+**A wildcard can make it look like your record already works.** Many registrars park a domain
+with `*.example.ch → their parking page`, so *any* name resolves and returns a plausible 404.
+Query a name that cannot exist — if it answers, you are looking at a wildcard, not your record:
+
+```zsh
+dig +short zzq7x-nonexistent.safelife.ch A     # an answer here means a wildcard is in play
+dig +short -x $(dig +short sos.safelife.ch A)  # reverse DNS names the real owner
+```
+
+**A stale AAAA silently prevents the certificate.** If the zone's wildcard also covers IPv6,
+your subdomain inherits an IPv6 address pointing at the registrar. Let's Encrypt and browsers
+**prefer IPv6 when an AAAA exists**, so the ACME challenge goes to the wrong host and the
+certificate never issues — with no obvious error tying it to DNS.
+
+The fix is automatic if you create a proper record: a wildcard only synthesises for names that
+have *no* records at all, so an explicit `A` for `sos` stops the wildcard applying to that name
+for **every** type, IPv6 included. Verify rather than assume:
+
+```zsh
+dig +short sos.safelife.ch A       # must equal the Elastic IP
+dig +short sos.safelife.ch AAAA    # must be EMPTY
+```
+
+Our instances have `ipv6 = false`, so there is nothing valid for an AAAA to point at. If one
+survives, delete it.
 
 ### Switch it on
 
@@ -450,14 +490,33 @@ ssh -i $SSHKEY ubuntu@$APPIP 'cd /opt/safelife && sudo docker compose up -d'
 ```
 
 Caddy obtains and renews the certificate itself, over HTTP-01, so the name must already
-resolve to this host and port 80 must stay open. Watch it happen:
+resolve to this host and port 80 must stay open.
+
+**Do not switch this on before DNS resolves.** Each failed validation counts against Let's
+Encrypt's limit of 5 failures per hostname per hour, and once you trip it you wait, even after
+the DNS is fixed. Confirm the two `dig` checks above first.
+
+Watch it happen, then verify properly — a 200 alone does not prove the certificate is real:
 
 ```zsh
 ssh -i $SSHKEY ubuntu@$APPIP 'sudo docker logs -f safelife-caddy'
-curl -sI https://safelife.example.ch | head -3
+
+echo | openssl s_client -connect sos.safelife.ch:443 -servername sos.safelife.ch 2>/dev/null \
+  | openssl x509 -noout -subject -issuer -dates
+
+curl -sS -o /dev/null -w 'https %{http_code}, tls verify %{ssl_verify_result} (0 = ok)\n' \
+  https://sos.safelife.ch/api/health
+curl -sS -o /dev/null -w 'http  %{http_code} -> %{redirect_url}\n' \
+  http://sos.safelife.ch/api/health          # expect 308 to https
 ```
 
-Then set `PUBLIC_BASE_URL` in `app.env` to the same name, scheme included — see section 9.
+A healthy result looks like `subject=CN=sos.safelife.ch`, `issuer=... Let's Encrypt`, a
+~90-day window, `tls verify 0`, and a 308 redirect on port 80.
+
+**Then set `PUBLIC_BASE_URL`** in `app.env` to the same name, scheme included — section 9.
+Until you do, `/api/status` reports `"publicBaseUrl": "(not set)"` and Twilio signature
+validation has nothing to validate against. It is the easiest step to forget, because
+everything else already works.
 
 ---
 
