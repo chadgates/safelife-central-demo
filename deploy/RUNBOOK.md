@@ -17,7 +17,8 @@ knowing before pasting:
   (`export APPIP='1.2.3.4'`). Replace the contents, keep the quotes — unquoted `<...>` is
   redirection syntax and will error.
 - If a trailing `#` comment errors, run `setopt interactive_comments` once.
-- `$REPO`, `$ZONE`, `$NAME`, `$MYIP` are set in step 0 and `$SSHKEY` in step 1; every later
+- `$TF` is set in Route A and used by every Terraform command; `$REPO`, `$ZONE`, `$NAME`,
+  `$MYIP` are set in step 0 and `$SSHKEY` in step 1; every later
   step uses them, so run the whole runbook in one shell session (or re-export them).
 - The scripts in `tools/` declare `#!/usr/bin/env bash`, so they run under bash whatever your
   interactive shell is.
@@ -107,6 +108,10 @@ Either way, **step 6 onwards is the same** and the two routes hand it the same v
 ### Route A — Terraform
 
 ```zsh
+# Whichever binary you installed. Everything below uses $TF so it works with both.
+export TF=$(command -v tofu || command -v terraform)
+echo "using: $TF"                        # empty means neither is installed - see step 0
+
 export EXOSCALE_API_KEY='EXO...'        # IAM → Keys
 export EXOSCALE_API_SECRET='...'
 
@@ -114,9 +119,9 @@ cd $REPO/infra
 cp terraform.tfvars.example terraform.tfvars
 ${EDITOR:-nano} terraform.tfvars         # admin_cidr is required: echo "$MYIP/32"
 
-terraform init                           # or: tofu init
-terraform plan                           # read it before approving
-terraform apply
+$TF init
+$TF plan                                 # read it before approving
+$TF apply
 ```
 
 Then hand the outputs to the rest of this runbook — these are the same variables steps 6–9
@@ -124,11 +129,17 @@ expect, so nothing downstream changes:
 
 ```zsh
 export SSHKEY=~/.ssh/exoscale_safelife
-export APPIP=$(terraform output -raw instance_ip)      # for ssh and scp
-export EIP=$(terraform output -raw elastic_ip)         # the address TWIG gets
+export APPIP=$($TF output -raw instance_ip)      # for ssh and scp
+export EIP=$($TF output -raw elastic_ip)         # the address TWIG gets
+
+# Fail loudly rather than carrying an empty variable into step 6, where it turns
+# ubuntu@$APPIP into ubuntu@ and scp reports a hostname it cannot resolve.
+[[ -n $APPIP && -n $EIP ]] \
+  && echo "APPIP=$APPIP  EIP=$EIP" \
+  || echo "EMPTY - are you in \$REPO/infra, did apply finish, is \$TF set?"
 
 # The database half of the env file, already filled in.
-terraform output -raw app_env > $REPO/deploy/app.env
+$TF output -raw app_env > $REPO/deploy/app.env
 chmod 600 $REPO/deploy/app.env
 
 cd $REPO
@@ -318,7 +329,7 @@ EOF
 
 # Database credentials.
 #
-# Route A (Terraform): app.env already exists, written by "terraform output -raw app_env".
+# Route A (Terraform): app.env already exists, written by "$TF output -raw app_env".
 #   Do NOT run the cp below - it would overwrite it. Append the Twilio and SendGrid blocks
 #   from app.env.example when you get to step 9.
 #
