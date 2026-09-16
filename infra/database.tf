@@ -9,16 +9,10 @@ resource "exoscale_dbaas" "pg" {
   maintenance_dow  = "sunday"
   maintenance_time = "03:00:00"
 
-  # DBaaS provisioning takes minutes, and the service is briefly unreadable after the
-  # create call is accepted - a read in that window returns 404 and fails the apply with
-  # "Unable to read database service pg ... resource not found", leaving the service
-  # created but absent from state. A generous create window rides through it.
-  timeouts {
-    create = "20m"
-    read   = "5m"
-    update = "20m"
-    delete = "10m"
-  }
+  # No timeouts block here, deliberately. The provider (0.72.0) advertises one on this
+  # resource but drops it from the apply response, so OpenTofu aborts with "Provider
+  # produced inconsistent result after apply: .timeouts: was present, but now absent".
+  # If a create fails with a 404 read-back, recover by importing - see README.
 
   # Refuses to destroy while true. Flip it deliberately before a teardown.
   termination_protection = false

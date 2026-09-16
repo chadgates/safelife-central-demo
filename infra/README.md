@@ -99,8 +99,11 @@ tofu plan          # expect "No changes"
 
 **If it is not listed**, just `tofu apply` again.
 
-The `timeouts` block on the resource widens the create window to 20 minutes, which should stop
-this recurring.
+There is no way to widen the create window from the configuration: provider 0.72.0 advertises
+a `timeouts` block on `exoscale_dbaas` but does not return it from apply, so adding one fails
+with *"Provider produced inconsistent result after apply: .timeouts: was present, but now
+absent"* — a provider bug, worth reporting upstream. Import is the recovery, and it is
+harmless: the database keeps running throughout.
 
 ## State holds secrets
 
