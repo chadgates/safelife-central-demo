@@ -22,6 +22,11 @@ EXPOSE 8080 9770
 # Workstation GC: this container is sized in hundreds of MB, not GB.
 ENV DOTNET_gcServer=0
 
+# The data protection key ring lives here. Created before USER so the named volume
+# inherits this ownership - a volume mounted onto a path that does not exist in the image
+# is created root-owned, and the app then cannot write to it.
+RUN mkdir -p /keys && chown 1654:1654 /keys
+
 # Provided by the base image (UID 1654). Both ports are >1024, so root is not needed.
 USER $APP_UID
 

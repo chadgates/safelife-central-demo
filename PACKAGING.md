@@ -19,19 +19,19 @@ requirement below is unclear, that repository is the answer.
 
 Drop this file into your repository root and point Claude Code at it:
 
-> Read PACKAGING.md. Audit this repository against every requirement R1–R33 and produce a
+> Read PACKAGING.md. Audit this repository against every requirement R1–R38 and produce a
 > table of pass / fail / not-applicable with the file and line for each finding. Do not
 > change anything yet.
 
 Then, once you agree with its assessment:
 
 > Implement the failing requirements from PACKAGING.md. Start with the R1–R8 group
-> (container and configuration), then R9–R16 (the device listener), then R25–R33 (the
+> (container and configuration), then R9–R16 (the device listener), then R25–R33, R34–R38 (authentication) (the
 > messaging channels). Show me the diff for each group before moving on.
 
 The requirements are numbered so you and Claude can refer to them precisely, and so our
 acceptance check (bottom of this file) maps one-to-one onto them. R1–R24 are the service
-itself; R25–R33 cover the Twilio SMS and SendGrid email channels.
+itself; R25–R33, R34–R38 (authentication) cover the Twilio SMS and SendGrid email channels.
 
 Where a requirement reads like we are designing your application, we are not — say so and we
 will drop it. The test is whether it changes what the deployment has to do.
@@ -257,6 +257,67 @@ API response. Where it helps to show configuration state, report *presence* only
 same webhook can arrive more than once. How you deduplicate is yours — `MessageSid` is the
 obvious key. We mention it only because we configure the webhook, and therefore cause the
 retries.
+
+---
+
+## 4c. User authentication — Microsoft Entra External ID
+
+Azure AD B2C closed to new customers on **1 May 2025**, so the CIAM product is **Microsoft
+Entra External ID**, in an **external tenant** (not a workforce tenant). We register the app
+and supply the configuration; you consume it.
+
+**R34 — Configuration keys.** External tenants use `Authority` against the `ciamlogin` host —
+*not* `Instance` + `TenantId`, which is the workforce-tenant shape and the most common early
+mistake:
+
+| Key | Value |
+|---|---|
+| `AzureAd__Authority` | `https://<tenant>.ciamlogin.com/<tenant-id>` |
+| `AzureAd__ClientId` | supplied by us |
+| `AzureAd__ClientSecret` | supplied by us, in the `0600` env file |
+| `AzureAd__CallbackPath` | `/signin-oidc` |
+| `AzureAd__SignedOutCallbackPath` | `/signout-callback-oidc` |
+
+Rename the section if your code prefers something else — tell us what, per R8.
+
+**R35 — Honour the reverse proxy, or sign-in cannot work.** We terminate TLS at Caddy and
+proxy to the container over plain HTTP, so the app sees `http://localhost:8080`. Left alone,
+ASP.NET Core builds a `redirect_uri` of `http://localhost:8080/signin-oidc`, which matches
+nothing registered and fails the flow. Configure `ForwardedHeadersOptions` for
+`XForwardedProto` and `XForwardedHost`, with `KnownProxies` or `KnownNetworks` set so the
+headers are only trusted from our proxy. This is the same trap as the Twilio webhook URL in
+R28 — one cause, two symptoms.
+
+**R36 — Persist the data protection key ring.** ASP.NET Core encrypts auth cookies with keys
+that default to the container filesystem, which is ephemeral: every deploy regenerates them
+and signs every user out. We mount a durable volume at `/keys` — call
+`PersistKeysToFileSystem(new DirectoryInfo("/keys"))`.
+
+That is sufficient for one instance. **The moment there is more than one**, a per-container
+volume stops working: instance A cannot decrypt a cookie issued by instance B. Then the key
+ring has to move to shared storage — `PersistKeysToDbContext` against the Postgres we already
+run is the least additional infrastructure. Given the fleet sizing points at more than one
+instance eventually, worth building behind an interface now rather than retrofitting.
+
+**R37 — Cookies.** `HttpOnly`, `Secure`, `SameSite=Lax` — `Lax` rather than `Strict` because
+the OIDC redirect arrives as a cross-site top-level navigation and `Strict` drops the
+correlation cookie, producing a sign-in loop that is thoroughly unpleasant to debug.
+
+**R38 — Sign-out must be federated.** Clearing the local cookie leaves the Entra session
+intact, so the next sign-in completes silently and the user appears not to have signed out at
+all. Redirect to the end-session endpoint.
+
+### A recommendation, not a requirement
+
+The frontend is AngularJS 1.x. MSAL's Angular wrapper supports Angular 2+ only, so
+browser-side authentication means `msal-browser` plus hand-rolled PKCE, silent renew and token
+storage in a framework from 2010.
+
+Since the same .NET process already serves the SPA from the same origin, the
+**backend-for-frontend** shape is both simpler and stronger: the backend runs the OIDC code
+flow and issues an encrypted `HttpOnly` cookie, and the SPA calls `/api/*` on the same origin
+with no token in JavaScript at all. It is your call — we mention it because it removes work
+rather than adding it.
 
 ---
 

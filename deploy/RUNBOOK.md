@@ -707,6 +707,55 @@ validation.
 
 ---
 
+## 9b. User authentication: Microsoft Entra External ID
+
+Azure AD B2C closed to new customers on 1 May 2025, so this is Entra External ID in an
+**external tenant**. Nothing here changes the infrastructure — no new ports, no inbound
+anything. It is an app registration plus five values in the env file.
+
+### Register the application
+
+In the Microsoft Entra admin centre, in an **external** tenant (a workforce tenant is the
+wrong product and will not offer sign-up flows):
+
+1. **App registrations → New registration.** Web platform.
+2. Redirect URIs, exactly — they are compared character for character:
+   ```
+   https://sos.safelife.ch/signin-oidc
+   https://sos.safelife.ch/signout-callback-oidc
+   ```
+3. **Certificates & secrets → New client secret.** Note the expiry; a secret that lapses
+   takes sign-in down with no warning, so diarise it with the Twilio and SendGrid rotations.
+4. **External Identities → User flows.** Create a sign-up/sign-in flow and associate the app.
+5. Note the tenant subdomain and tenant id for the authority URL.
+
+### Put the values on the host
+
+```zsh
+${EDITOR:-nano} $REPO/deploy/app.env      # the AzureAd__* block
+ssh -i $SSHKEY ubuntu@$APPIP 'sudo tee /etc/safelife/app.env >/dev/null && sudo chmod 600 /etc/safelife/app.env' < $REPO/deploy/app.env
+ssh -i $SSHKEY ubuntu@$APPIP 'cd /opt/safelife && sudo docker compose up -d --force-recreate app'
+```
+
+### Two things that will otherwise waste a day
+
+**The redirect URI will be wrong until the app trusts our proxy.** Caddy terminates TLS and
+forwards over plain HTTP, so ASP.NET Core sees `http://localhost:8080` and builds a
+`redirect_uri` nobody registered. It needs forwarded-header handling — same root cause as the
+Twilio webhook URL. Symptom: a redirect to `http://localhost:8080/signin-oidc`, or Entra
+refusing with a redirect-URI mismatch.
+
+**Everyone gets signed out on every deploy** unless the data protection key ring is durable.
+The compose file mounts a volume at `/keys` for this; the application has to be told to use
+it. If sign-ins survive a `docker compose up -d --force-recreate app`, it is working.
+
+### Cost
+
+The Basic tier covers the first 50,000 monthly active users at no charge. For a platform
+where operators sign in and devices do not, that is effectively free.
+
+---
+
 ## 10. The production shape: an address that outlives the machine
 
 Everything above puts the device port on the *instance's* public IP. That address dies
