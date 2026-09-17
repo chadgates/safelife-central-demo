@@ -229,10 +229,10 @@ they are deliberately dynamic — so the signature is the *only* access control 
 Honour `TWILIO_VALIDATE_SIGNATURES` so it can be disabled locally, and make the application log
 loudly at startup when it is off.
 
-**R28 — Compute the signature against `PUBLIC_BASE_URL`, not the incoming request.** We
+**R28 — Compute the signature against the configured public base URL, not the incoming request.** We
 terminate TLS at Caddy, so the application sees `http://localhost:8080` and would build the
 wrong URL — `https` versus `http` alone breaks validation. Either construct the validation URL
-from `PUBLIC_BASE_URL` + path + query, or configure
+from the configured base URL + path + query, or configure
 `ForwardedHeadersOptions` (`XForwardedProto`, `XForwardedHost`) and verify the result matches.
 This is the single most common inbound-webhook failure.
 
