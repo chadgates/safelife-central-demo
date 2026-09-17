@@ -660,9 +660,34 @@ Read the headers before changing anything — they say exactly why:
 - `X-Forefront-Antispam-Report:` — Microsoft's own verdict. `CAT:` gives the category
   (`SPM` spam, `BULK`, `PHSH` phishing), and `SCL:` the confidence score.
 
-If authentication passes, it is reputation: release the message and **report it as not junk**,
-which trains both the tenant and Microsoft. A tenant allow-list entry works as a stopgap, but
-treat it as a plaster — it only covers your own organisation, not the customer's.
+What you do next depends entirely on `CAT:`, and the two cases are not alike.
+
+**`CAT:SPM` / `CAT:BULK` — reputation.** Release the message and report it as not junk. That
+trains the tenant and Microsoft. An allow-list entry works as a stopgap, though it only covers
+your own organisation, not a customer's.
+
+**`CAT:HPHISH` — high confidence phishing. Treat this as a red flag, not a filter to bypass.**
+Microsoft is *secure by default* here: high-confidence phishing is always quarantined, like
+malware, and **the usual overrides do not apply** — not allowed-sender or allowed-domain lists
+in anti-spam policies, not mail flow rules requesting bypass. Fighting the filter will not work
+and is the wrong instinct anyway: something in the message looks like a credential lure, and
+recipients' filters elsewhere will reach the same conclusion.
+
+The one sanctioned route is an **admin submission** — security.microsoft.com → Submissions →
+Emails → *should not have been blocked*. That reaches Microsoft's analysts, and only after
+reporting can a Tenant Allow/Block List entry temporarily override the verdict.
+
+Then fix what triggered it. In order of likelihood for this kind of service:
+
+- **Click tracking.** SendGrid rewrites every link to a shared tracking host by default, so mail
+  from your domain carries links to somewhere unrelated — the defining shape of a phishing lure.
+  Turn it off for transactional mail, or configure Link Branding so URLs stay on your domain.
+- **Alarm-shaped copy.** Urgency, "emergency", "click here immediately", a bare link and little
+  else. Legitimate for an SOS product, and indistinguishable from a lure to a filter.
+- **Sender presentation.** A display name that implies an identity the domain does not back up.
+- **Self-spoof.** If the sending domain is also an accepted domain in the recipient's tenant,
+  external mail claiming to be from it is treated as impersonation almost regardless of SPF and
+  DKIM. Worth checking before anything else.
 
 ```
 SENDGRID_API_KEY=<key scoped to Mail Send>
