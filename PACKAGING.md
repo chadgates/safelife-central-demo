@@ -2,7 +2,8 @@
 
 **For:** the developer building the SafeLife/TWIG service
 **From:** the team operating it on Exoscale
-**Status:** requirements, not suggestions — the deployment is already built against them
+**Status:** the deployment is already built against these. Where one turns out to be about
+your design rather than ours, say so and we will drop it — several already have been.
 
 We run your image on a Swiss Exoscale host with managed PostgreSQL, a reserved public IP for
 the devices, and Caddy terminating TLS. We do not need your source code. We need **one
@@ -25,13 +26,13 @@ Drop this file into your repository root and point Claude Code at it:
 
 Then, once you agree with its assessment:
 
-> Implement the failing requirements from PACKAGING.md. Start with the R1–R8 group
-> (container and configuration), then R9–R16 (the device listener), then R25–R33, R34–R38 (authentication) (the
-> messaging channels). Show me the diff for each group before moving on.
+> Implement the failing requirements from PACKAGING.md. Start with R1–R8 (container and
+> configuration), then R9–R18 (the device listener), then R25–R33 (messaging) and R34–R38
+> (authentication). Show me the diff for each group before moving on.
 
 The requirements are numbered so you and Claude can refer to them precisely, and so our
 acceptance check (bottom of this file) maps one-to-one onto them. R1–R24 are the service
-itself; R25–R33, R34–R38 (authentication) cover the Twilio SMS and SendGrid email channels.
+itself, R25–R33 the Twilio and SendGrid channels, R34–R38 user authentication.
 
 Where a requirement reads like we are designing your application, we are not — say so and we
 will drop it. The test is whether it changes what the deployment has to do.
@@ -78,7 +79,7 @@ names (`PGHOST`, `TWILIO_AUTH_TOKEN`). That was overreach — the deployment wri
 .NET convention if that is what fits your code:
 
 ```
-ConnectionStrings__Dynamics = Server=...;Database=Dynamics;...
+ConnectionStrings__SafeLife = Host=...;Port=...;Database=...;Username=...;Password=...;SSL Mode=Require;Trust Server Certificate=true
 Twilio__AccountSid          = ...
 Twilio__AuthToken           = ...
 Twilio__From                = ...
@@ -114,7 +115,7 @@ working set, surviving a whole-fleet reconnect. The specific techniques are how 
 implementation hits that budget, and you are free to hit it another way — but four of them sit
 right at the 2000 mark, which is why they are called out rather than left implicit.
 
-**R9 — Bind `0.0.0.0:$SAFELIFE_TCP_PORT`.** Not localhost.
+**R9 — Bind `0.0.0.0` on the configured device port.** Not localhost.
 
 **R10 — Fully async, never a thread per connection.** `AcceptTcpClientAsync`, `ReadAsync`, and
 never `Task.Run` wrapped around a synchronous read. 2000 blocking reads means 2000 threads and
@@ -135,11 +136,11 @@ Pass an explicit backlog of at least 1024. We set `net.core.somaxconn` on the ho
 
 **R14 — Idle read timeout.** Devices vanish without sending FIN — flat battery, no coverage.
 Without a read deadline the server holds half-open sessions forever and the descriptor count
-only grows. Reset the deadline on every read; drop the session past
-`SAFELIFE_IDLE_TIMEOUT_SECONDS`. Ask TWIG for the device keep-alive interval and make sure
-the default is comfortably longer than it.
+only grows. Reset the deadline on every read and drop the session once it expires. Make the
+timeout configurable — we set it from TWIG's keep-alive interval, and it must be comfortably
+longer than that.
 
-**R15 — Hard connection cap** at `SAFELIFE_MAX_CONNECTIONS`, so a bug cannot exhaust the host.
+**R15 — Hard connection cap**, configurable, so a bug cannot exhaust the host.
 
 **R16 — Capture the real client IP per session** and attach it to every stored message and log
 line. We run the container on the host network specifically so this survives — do not
@@ -158,7 +159,7 @@ single device's traffic can be followed in the logs.
 
 **R19 — The database connection string is ours to supply, not yours to compose.** We run the
 Postgres, so we hand you a finished Npgsql connection string to drop under whichever
-`ConnectionStrings__*` key you use. `terraform output -raw connection_string_dotnet` emits it,
+`ConnectionStrings__*` key you use. `tofu output -raw connection_string_dotnet` emits it,
 already carrying the three settings that are easy to get wrong:
 
 ```
@@ -226,8 +227,8 @@ back to account SID + auth token for sending if no API key is configured.
 **R27 — Validate every inbound webhook signature.** Use the Twilio SDK's own validator, never
 a hand-rolled HMAC. Reject with 403 on failure. Twilio publishes no webhook source IP ranges —
 they are deliberately dynamic — so the signature is the *only* access control on that endpoint.
-Honour `TWILIO_VALIDATE_SIGNATURES` so it can be disabled locally, and make the application log
-loudly at startup when it is off.
+Make it switchable so it can be disabled on a developer laptop, and log loudly at startup
+whenever it is off.
 
 **R28 — Compute the signature against the configured public base URL, not the incoming request.** We
 terminate TLS at Caddy, so the application sees `http://localhost:8080` and would build the
@@ -368,13 +369,12 @@ acceptance test — nothing hidden:
 
 ```bash
 IMAGE='ghcr.io/you/your-service:latest'      # quoted: bare <angle-brackets> are shell redirection
+CS='Host=host.docker.internal;Port=5432;Database=postgres;Username=postgres;Password=dev;SSL Mode=Disable'
 
 docker run -d --name pg -e POSTGRES_PASSWORD=dev -p 5432:5432 postgres:17
 
 docker run -d --name app \
-  -e PGHOST=host.docker.internal -e PGDATABASE=postgres \
-  -e PGUSER=postgres -e PGPASSWORD=dev \
-  -e PGSSLMODE=Disable -e PGTRUSTSERVERCERT=false \
+  -e "ConnectionStrings__SafeLife=$CS" \
   -p 8080:8080 -p 9770:9770 "$IMAGE"
 
 docker exec app id                      # R4  - not root
@@ -392,13 +392,13 @@ for i in $(seq 1 200); do { printf 'session-%03d\n' $i; sleep 8; } | nc localhos
 
 # R14 - a session idle past the timeout is dropped by the server, not left half-open
 
-# R25/R32 - credentials arrive and are never echoed. Presence only in the response.
-docker rm -f app >/dev/null; docker run -d --name app \
-  -e PGHOST=host.docker.internal -e PGDATABASE=postgres -e PGUSER=postgres -e PGPASSWORD=dev \
-  -e PGSSLMODE=Disable -e PGTRUSTSERVERCERT=false \
-  -e PUBLIC_BASE_URL=https://example.test \
-  -e TWILIO_ACCOUNT_SID=ACtest -e TWILIO_AUTH_TOKEN=tok_secret \
-  -e SENDGRID_API_KEY=SG.secret \
+# R25/R32 - credentials arrive and are never echoed anywhere in a response
+docker rm -f app >/dev/null
+docker run -d --name app \
+  -e "ConnectionStrings__SafeLife=$CS" \
+  -e PublicBaseUrl=https://example.test \
+  -e Twilio__AccountSid=ACtest -e Twilio__AuthToken=tok_secret \
+  -e SendGrid__ApiKey=SG.secret \
   -p 8080:8080 -p 9770:9770 "$IMAGE"
 sleep 8
 curl -s localhost:8080/api/status | grep -c 'tok_secret\|SG.secret'   # must be 0
@@ -406,6 +406,11 @@ curl -s localhost:8080/api/status | grep -c 'tok_secret\|SG.secret'   # must be 
 # R27/R28 - an unsigned POST to the webhook must be rejected
 curl -s -o /dev/null -w '%{http_code}\n' -X POST localhost:8080/api/sms/inbound \
   -d 'From=%2B41000000000&Body=test&MessageSid=SMtest'                 # must be 403
+
+# R35 - behind a proxy the app must build https://... redirect URIs, not http://localhost:8080
+curl -s -o /dev/null -w '%{redirect_url}\n' \
+  -H 'X-Forwarded-Proto: https' -H 'X-Forwarded-Host: example.test' \
+  localhost:8080/signin-oidc
 ```
 
 If the 150-message burst loses messages, R12 is not implemented. If the 200 concurrent
@@ -421,10 +426,10 @@ how the service works is yours.
 
 | We need | Because it sets |
 |---|---|
-| **Device port** | the Exoscale security group rule and `SAFELIFE_TCP_PORT` |
-| **Device source IP ranges**, if TWIG will give them | whether port 9770 is open to the world or narrowed |
-| **Device keep-alive interval** | `SAFELIFE_IDLE_TIMEOUT_SECONDS`, which must be comfortably longer |
-| **Peak concurrent sessions** per deployment | instance size, `nofile`, accept backlog, `SAFELIFE_MAX_CONNECTIONS` |
+| **Device port** | the Exoscale security group rule, and the port we configure |
+| **Device source IP ranges**, if TWIG will give them | whether the device port is open to the world or narrowed |
+| **Device keep-alive interval** | the idle-read timeout, which must be comfortably longer |
+| **Peak concurrent sessions** per deployment | instance size, `nofile`, accept backlog, the connection cap |
 | **Message rate and stored size per device** | the database tier, disk, and retention policy |
 | **Whether anything is written to disk** | whether we need object storage — the container filesystem is ephemeral |
 | **Webhook paths** for inbound SMS and status | what we configure on the Twilio number, and it makes TLS mandatory |
