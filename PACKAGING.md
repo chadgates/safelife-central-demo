@@ -156,9 +156,20 @@ single device's traffic can be followed in the logs.
 
 ## 4. Database
 
-**R19 — Build the connection string from the parts in R8.** Do **not** try to parse a
-`postgres://` URI — Npgsql does not accept one, and that is the single most common first-run
-failure with managed Postgres.
+**R19 — The database connection string is ours to supply, not yours to compose.** We run the
+Postgres, so we hand you a finished Npgsql connection string to drop under whichever
+`ConnectionStrings__*` key you use. `terraform output -raw connection_string_dotnet` emits it,
+already carrying the three settings that are easy to get wrong:
+
+```
+Host=…;Port=…;Database=…;Username=…;Password=…;
+SSL Mode=Require;Trust Server Certificate=true;Maximum Pool Size=8
+```
+
+Do **not** compose one from a `postgres://` URI — Npgsql does not parse that form, and it is
+the single most common first-run failure with managed Postgres. If the service also needs to
+reach a database we do not run, tell us early: that is an egress and firewall question, and
+possibly a data-residency one.
 
 **R20 — TLS is mandatory and the certificate is provider-signed.** Managed Postgres refuses
 plaintext, and the CA does not match the hostname, so hostname verification must be off:
@@ -192,12 +203,15 @@ SMS is the backup path when a device's TCP session is dead; email is a notificat
 The deployment already carries the variables below — read them, do not invent new names for
 the same things.
 
-**R25 — Same rule as R8: your names, told to us.** For the record, the set we have been given:
+**R25 — Same rule as R8: your names, told to us.** One deployable service, so the container
+gets the union of the keys below. *SmsGateway* and *AlertForwarder* name the two outbound
+channels inside the application, not two things we deploy:
 
-| Service | Keys |
+| Channel | Keys |
 |---|---|
-| SmsGateway | `ConnectionStrings__Dynamics`, `Twilio__AuthToken` |
-| AlertForwarder | `Twilio__AccountSid`, `Twilio__AuthToken`, `Twilio__From`, `SendGrid__ApiKey`, `SendGrid__From` |
+| SMS (Twilio) | `Twilio__AccountSid`, `Twilio__AuthToken`, `Twilio__From` |
+| Email (SendGrid) | `SendGrid__ApiKey`, `SendGrid__From` |
+| Database | one `ConnectionStrings__*` entry — **value supplied by us**, see R19 |
 
 Plus one the deployment has to add, because only we know it: the **public base URL** the
 service is reached on. Name it whatever suits — `PublicBaseUrl` alongside the rest would be

@@ -56,3 +56,28 @@ output "monthly_chf" {
     + (var.managed_database ? lookup({ "hobbyist-2" = 41.84, "startup-4" = 98.49 }, var.db_plan, 0) : 0)
   )
 }
+
+# The database connection in the form the .NET service actually wants. Npgsql cannot parse a
+# postgres:// URI, so we hand over a composed connection string rather than a URL.
+#   tofu output -raw connection_string_dotnet
+output "connection_string_dotnet" {
+  sensitive   = true
+  description = "One ConnectionStrings__<name> line, ready to paste into app.env."
+
+  value = var.managed_database ? join("", [
+    "ConnectionStrings__${var.connection_string_name}=",
+    "Host=${data.exoscale_database_uri.pg[0].host};",
+    "Port=${data.exoscale_database_uri.pg[0].port};",
+    "Database=${data.exoscale_database_uri.pg[0].db_name};",
+    "Username=${data.exoscale_database_uri.pg[0].username};",
+    "Password=${data.exoscale_database_uri.pg[0].password};",
+    # Managed Postgres refuses plaintext and presents a certificate from its own CA, so
+    # hostname verification has to be off. The pool cap keeps us under the ~20 connection
+    # ceiling of the entry-tier plan.
+    "SSL Mode=Require;Trust Server Certificate=true;Maximum Pool Size=8",
+    ]) : join("", [
+    "ConnectionStrings__${var.connection_string_name}=",
+    "Host=127.0.0.1;Port=5432;Database=safelife;Username=safelife;Password=CHANGE_ME;",
+    "SSL Mode=Disable;Maximum Pool Size=8",
+  ])
+}

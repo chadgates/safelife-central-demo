@@ -72,3 +72,9 @@ variable "pg_version" {
   type    = string
   default = "17"
 }
+
+variable "connection_string_name" {
+  description = "Key the application reads the database under, i.e. ConnectionStrings__<this>."
+  type        = string
+  default     = "SafeLife"
+}
