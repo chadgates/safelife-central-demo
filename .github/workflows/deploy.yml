@@ -1,6 +1,13 @@
 name: deploy
 
-# Run the deployment instead of typing exo/ssh commands by hand.
+# NOT USABLE AS THINGS STAND - use tools/deploy.sh instead.
+#
+# This needs to SSH into the instance, but the security group allows port 22 from one
+# address (admin_cidr) and GitHub's runners come from a large rotating pool. Runs fail with
+# "connect to host ... port 22: Connection timed out" after the secrets check passes.
+#
+# It becomes usable if you later open 22 more widely, or move to a self-hosted runner.
+# Until then tools/deploy.sh does the same work from a machine that is already allowed.
 #
 # Inert until three repository secrets exist (Settings -> Secrets and variables -> Actions):
 #   DEPLOY_HOST     the instance IP or hostname

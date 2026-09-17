@@ -79,7 +79,10 @@ so the server can pull without credentials.
 **2. Follow [`deploy/RUNBOOK.md`](deploy/RUNBOOK.md)** once, to create the infrastructure.
 About fifteen minutes, ~CHF 69/month if left running, hourly billing if not.
 
-**3. After that, deploy from CI.** The `exo` commands in the runbook are for *provisioning*,
+**3. After that, deploy with `./tools/deploy.sh`.** (The GitHub `deploy` workflow exists but
+cannot reach the instance — SSH is restricted to one address and runners are not it.)
+
+**3b. For reference, what the workflow would have done.** The `exo` commands in the runbook are for *provisioning*,
 which you do once. Redeploying the application is the `deploy` workflow — Actions → deploy →
 pick a tag. It pins the tag on the host, runs migrations as a one-shot before switching over,
 brings the container up and checks `/api/health`. It is inert until three secrets exist; the

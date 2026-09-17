@@ -346,9 +346,9 @@ ssh -i $SSHKEY ubuntu@$APPIP 'cd /opt/safelife && sudo docker compose pull && su
 ```
 
 > **`docker-compose.yml` and `Caddyfile` on the host are copies.** Editing them in the repo
-> changes nothing until they are copied again. The `deploy` workflow now ships them on every
-> run; if you are deploying by hand, repeat the `scp` above after any change — otherwise a
-> change looks applied while the server knows nothing about it.
+> changes nothing until they are copied again — a change can look applied while the server
+> knows nothing about it. `tools/deploy.sh` ships them on every run, which is the main reason
+> to use it rather than typing the commands.
 
 ### Registry authentication
 
@@ -401,6 +401,25 @@ block the first real deployment, so raise it early:
 - **Ask which it will be as part of the commercial agreement**, alongside who owns the
   registry namespace long term. Moving the image later means re-pointing `IMAGE=` on every
   host and re-issuing tokens.
+
+### Redeploying later
+
+```zsh
+./tools/deploy.sh                    # :latest
+./tools/deploy.sh --tag sha-abc123   # an immutable tag
+./tools/deploy.sh --migrate          # run migrations before switching over
+./tools/deploy.sh --env              # also push deploy/app.env (secrets - deliberate only)
+```
+
+It works out the host from `$APPIP` or the Terraform state, ships the compose files, pins the
+tag, pulls, restarts and checks `/api/health` — refusing to start rather than carrying an
+empty variable into an ssh command.
+
+The GitHub `deploy` workflow does the same thing but cannot reach the instance: SSH is
+restricted to your address and runners come from a rotating pool. It stays in the repo for
+whenever that changes.
+
+---
 
 ## 7. Prove it works
 
