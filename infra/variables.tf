@@ -10,15 +10,19 @@ variable "name" {
   default     = "safelife"
 }
 
-variable "admin_cidr" {
-  description = "Your public address, in CIDR form. Gates SSH and direct database access."
-  type        = string
+variable "admin_cidrs" {
+  description = <<-EOT
+    Addresses allowed to reach SSH and the database directly, in CIDR form.
+    A list, because a laptop moves: home, office, tethering. Add the ones you actually
+    use rather than editing a single value every time you change network.
+  EOT
+  type        = list(string)
 
   validation {
-    # An empty or malformed value here silently produces "/32", which the Exoscale API
-    # rejects with a message that points nowhere near the real cause.
-    condition     = can(cidrnetmask(var.admin_cidr))
-    error_message = "admin_cidr must be valid CIDR, e.g. 203.0.113.10/32 - run: echo \"$(curl -s https://ifconfig.me)/32\""
+    # An empty or malformed entry silently becomes "/32", which the Exoscale API rejects
+    # with a message that points nowhere near the real cause.
+    condition     = length(var.admin_cidrs) > 0 && alltrue([for c in var.admin_cidrs : can(cidrnetmask(c))])
+    error_message = "admin_cidrs must be a non-empty list of valid CIDRs, e.g. [\"203.0.113.10/32\"] - run: echo \"$(curl -s https://ifconfig.me)/32\""
   }
 }
 

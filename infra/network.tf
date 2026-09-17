@@ -3,13 +3,16 @@ resource "exoscale_security_group" "app" {
   description = "SafeLife Central: web, device listener, admin SSH"
 }
 
-# SSH: your address only. Never 0.0.0.0/0.
+# SSH: your addresses only. Never 0.0.0.0/0. One rule per entry, so they can be added and
+# removed individually.
 resource "exoscale_security_group_rule" "ssh" {
+  for_each = toset(var.admin_cidrs)
+
   security_group_id = exoscale_security_group.app.id
   description       = "admin ssh"
   type              = "INGRESS"
   protocol          = "TCP"
-  cidr              = var.admin_cidr
+  cidr              = each.value
   start_port        = 22
   end_port          = 22
 }

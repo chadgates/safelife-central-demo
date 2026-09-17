@@ -23,10 +23,10 @@ resource "exoscale_dbaas" "pg" {
 
     # Only these two can reach the database. Everything else is refused at the edge, which
     # matters because the service sits on a public hostname with no network in front of it.
-    ip_filter = [
-      var.admin_cidr,
-      "${exoscale_compute_instance.app.public_ip_address}/32",
-    ]
+    ip_filter = concat(
+      var.admin_cidrs,
+      ["${exoscale_compute_instance.app.public_ip_address}/32"],
+    )
   }
 }
 

@@ -291,6 +291,17 @@ keeps its own address, and simply gains a second one.
 
 > **Route B only.** Terraform did this — skip to step 6.
 
+> **Locked out after moving network?** SSH and the database are gated on `admin_cidrs` in
+> `infra/terraform.tfvars`, which is a list. Add the address rather than replacing it:
+>
+> ```zsh
+> echo "  \"$(curl -s https://ifconfig.me)/32\","    # paste into the list
+> cd $REPO/infra && $TF apply                       # 1 rule added, plus the db ip_filter
+> ```
+>
+> Nothing else is affected — the site, the devices and certificate renewal all carry on.
+> Only your admin access breaks.
+
 **Checkpoint — worth running on either route.** An empty variable does not error — it silently expands to nothing, so
 `${APPIP}/32` becomes `/32` and Exoscale rejects it with
 `Invalid 'user_config' ip_filter value '/32'`, which says nothing about the real cause. Check
