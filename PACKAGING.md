@@ -167,6 +167,11 @@ Host=…;Port=…;Database=…;Username=…;Password=…;
 SSL Mode=Require;Trust Server Certificate=true;Maximum Pool Size=8
 ```
 
+**Use `ConnectionStrings__SafeLife` for now.** R8 leaves naming to you, and that still holds —
+but a working default beats a placeholder, so take this one unless your code wants otherwise.
+It is generated, not typed: the key comes from the `connection_string_name` variable in our
+Terraform, so changing it later is one variable and a re-run, not a negotiation.
+
 Do **not** compose one from a `postgres://` URI — Npgsql does not parse that form, and it is
 the single most common first-run failure with managed Postgres. If the service also needs to
 reach a database we do not run, tell us early: that is an egress and firewall question, and
