@@ -74,6 +74,14 @@ jobs:
 
           echo "Deploying $IMAGE to $HOST"
 
+          # Ship the compose file and Caddyfile every time. Without this they are whatever
+          # was copied by hand at first deploy, and edits in the repo never reach the host -
+          # which is exactly how a change can look applied while the server knows nothing
+          # about it.
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new \
+            deploy/docker-compose.yml deploy/Caddyfile "$USER@$HOST:/tmp/"
+          $SSH "$USER@$HOST" "sudo mv /tmp/docker-compose.yml /tmp/Caddyfile /opt/safelife/"
+
           # Pin the tag on the host, so a reboot brings back the version we chose and not
           # whatever "latest" happens to be by then.
           $SSH "$USER@$HOST" "sudo sed -i 's|^IMAGE=.*|IMAGE=${IMAGE}|' /opt/safelife/.env"

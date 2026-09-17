@@ -15,12 +15,9 @@ services:
     network_mode: host
     env_file:
       - /etc/safelife/app.env
-    volumes:
-      # ASP.NET Core encrypts auth cookies with a key ring that lives on the container
-      # filesystem by default - which is ephemeral. Without somewhere durable, every deploy
-      # regenerates it and signs every user out. The app must persist keys to /keys.
-      # With more than one instance this is not enough; see PACKAGING.md R36.
-      - dataprotection_keys:/keys
+    # No volume for the ASP.NET Core data protection key ring: it belongs in the database.
+    # A named volume lives on THIS instance, and this instance is disposable by design - the
+    # Elastic IP survives a rebuild, the volume does not. See PACKAGING.md R36.
     ulimits:
       # One descriptor per device session. Docker's default soft limit is often 1024,
       # which starts refusing connections at roughly a thousand devices.
@@ -56,4 +53,3 @@ services:
 volumes:
   caddy_data:
   caddy_config:
-  dataprotection_keys:

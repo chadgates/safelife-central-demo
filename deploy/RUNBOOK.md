@@ -345,6 +345,11 @@ ssh -i $SSHKEY ubuntu@$APPIP 'sudo tee /etc/safelife/app.env >/dev/null && sudo 
 ssh -i $SSHKEY ubuntu@$APPIP 'cd /opt/safelife && sudo docker compose pull && sudo systemctl start safelife'
 ```
 
+> **`docker-compose.yml` and `Caddyfile` on the host are copies.** Editing them in the repo
+> changes nothing until they are copied again. The `deploy` workflow now ships them on every
+> run; if you are deploying by hand, repeat the `scp` above after any change — otherwise a
+> change looks applied while the server knows nothing about it.
+
 ### Registry authentication
 
 **This demo's package is public, so the pull above works with no credentials.** The real

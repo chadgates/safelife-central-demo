@@ -288,16 +288,23 @@ nothing registered and fails the flow. Configure `ForwardedHeadersOptions` for
 headers are only trusted from our proxy. This is the same trap as the Twilio webhook URL in
 R28 — one cause, two symptoms.
 
-**R36 — Persist the data protection key ring.** ASP.NET Core encrypts auth cookies with keys
-that default to the container filesystem, which is ephemeral: every deploy regenerates them
-and signs every user out. We mount a durable volume at `/keys` — call
-`PersistKeysToFileSystem(new DirectoryInfo("/keys"))`.
+**R36 — Persist the data protection key ring in the database.** ASP.NET Core encrypts auth
+cookies with keys that default to the container filesystem, which is ephemeral: every deploy
+regenerates them and signs every user out.
 
-That is sufficient for one instance. **The moment there is more than one**, a per-container
-volume stops working: instance A cannot decrypt a cookie issued by instance B. Then the key
-ring has to move to shared storage — `PersistKeysToDbContext` against the Postgres we already
-run is the least additional infrastructure. Given the fleet sizing points at more than one
-instance eventually, worth building behind an interface now rather than retrofitting.
+The obvious fix is a mounted volume, and it is the wrong one here. **A named volume lives on
+one instance, and the instance is disposable by design** — the whole architecture rests on the
+Elastic IP outliving the machine, so that a rebuild is routine. A key ring on the instance dies
+with it, taking every session with it. The same applies the moment there is a second instance:
+one cannot decrypt a cookie issued by the other.
+
+So use `PersistKeysToDbContext` against the Postgres we already run. It survives instance
+replacement and multiple instances alike, and adds no infrastructure.
+
+If you deliberately choose the filesystem instead, say so — we then need to add a volume to
+the compose file *and* a writable directory owned by the app user in your image, because a
+volume mounted onto a path absent from the image is created root-owned and a non-root app
+cannot write to it.
 
 **R37 — Cookies.** `HttpOnly`, `Secure`, `SameSite=Lax` — `Lax` rather than `Strict` because
 the OIDC redirect arrives as a cross-site top-level navigation and `Strict` drops the
