@@ -72,26 +72,33 @@ business in the build context.
 **R7 — Everything from environment variables.** No secrets in the image, no environment-specific
 `appsettings.*.json` baked in. We inject an env file at deploy time.
 
-**R8 — These exact variable names.** Our deployment already writes them. Renaming one means
-changing our infrastructure, so treat them as fixed:
+**R8 — You name them; tell us what they are.** An earlier version of this brief dictated flat
+names (`PGHOST`, `TWILIO_AUTH_TOKEN`). That was overreach — the deployment writes
+`KEY=value` lines into an env file, and it does not care what the keys are called. Use the
+.NET convention if that is what fits your code:
 
-| Variable | Meaning | Default if unset |
-|---|---|---|
-| `PGHOST` | Postgres hostname | `localhost` |
-| `PGPORT` | Postgres port | `5432` |
-| `PGDATABASE` | database name | `defaultdb` |
-| `PGUSER` | username | — |
-| `PGPASSWORD` | password | — |
-| `PGSSLMODE` | `Require` in every deployed environment | `Require` |
-| `PGTRUSTSERVERCERT` | `true` — see R20 | `true` |
-| `PGMAXPOOL` | Npgsql maximum pool size | `8` |
-| `SAFELIFE_HTTP_PORT` | HTTP port for API + frontend | `8080` |
-| `SAFELIFE_TCP_PORT` | device listener port | `9770` |
-| `SAFELIFE_IDLE_TIMEOUT_SECONDS` | drop a silent session after this | `300` |
-| `SAFELIFE_MAX_CONNECTIONS` | hard cap on concurrent sessions | `2500` |
+```
+ConnectionStrings__Dynamics = Server=...;Database=Dynamics;...
+Twilio__AccountSid          = ...
+Twilio__AuthToken           = ...
+Twilio__From                = ...
+SendGrid__ApiKey            = ...
+SendGrid__From              = ...
+```
 
-Read them with sane defaults so the container also runs on a developer laptop with nothing
-set but the `PG*` values.
+Verified end to end: mixed case, the `__` separator, and values containing `;`, `=`, `.` and
+spaces all pass through an `env_file` into the container unaltered. Nothing needs escaping.
+
+What we do need from you is **the list**: every key, what it is for, and which service reads
+it. We write them into a `0600` file on the host and nothing else. Two asks that are about the
+deployment rather than your design:
+
+- **Defaults for everything non-secret**, so the container starts on a laptop with only the
+  connection strings set.
+- **Fail fast and loudly on a missing secret.** A service that starts happily and only fails
+  when the first SMS is sent turns a config typo into a production incident.
+
+
 
 ---
 
@@ -185,19 +192,17 @@ SMS is the backup path when a device's TCP session is dead; email is a notificat
 The deployment already carries the variables below — read them, do not invent new names for
 the same things.
 
-**R25 — These exact variable names.**
+**R25 — Same rule as R8: your names, told to us.** For the record, the set we have been given:
 
-| Variable | Meaning |
+| Service | Keys |
 |---|---|
-| `PUBLIC_BASE_URL` | the address the outside world reaches us on, scheme included |
-| `TWILIO_ACCOUNT_SID` | account SID |
-| `TWILIO_AUTH_TOKEN` | account auth token — required for webhook signature validation |
-| `TWILIO_API_KEY_SID` / `TWILIO_API_KEY_SECRET` | preferred credentials for outbound REST calls |
-| `TWILIO_MESSAGING_SERVICE_SID` | messaging service, preferred over a fixed number |
-| `TWILIO_FROM_NUMBER` | E.164 sender, used only when no messaging service is set |
-| `TWILIO_VALIDATE_SIGNATURES` | `true` everywhere except a local dev box |
-| `SENDGRID_API_KEY` | SendGrid key, scoped to Mail Send only |
-| `SENDGRID_FROM_EMAIL` / `SENDGRID_FROM_NAME` | sender identity |
+| SmsGateway | `ConnectionStrings__Dynamics`, `Twilio__AuthToken` |
+| AlertForwarder | `Twilio__AccountSid`, `Twilio__AuthToken`, `Twilio__From`, `SendGrid__ApiKey`, `SendGrid__From` |
+
+Plus one the deployment has to add, because only we know it: the **public base URL** the
+service is reached on. Name it whatever suits — `PublicBaseUrl` alongside the rest would be
+consistent. Twilio signs the exact URL it was configured with, and behind our reverse proxy
+the application sees `http://localhost:8080`, so it cannot work this out for itself. See R28.
 
 **R26 — Prefer API keys for sending, but still require the auth token.** Inbound webhook
 signatures are HMAC-SHA1 keyed on the *account auth token* specifically — an API key cannot
