@@ -781,8 +781,10 @@ Twilio webhook URL. Symptom: a redirect to `http://localhost:8080/signin-oidc`, 
 refusing with a redirect-URI mismatch.
 
 **Everyone gets signed out on every deploy** unless the data protection key ring is durable.
-The compose file mounts a volume at `/keys` for this; the application has to be told to use
-it. If sign-ins survive a `docker compose up -d --force-recreate app`, it is working.
+By default it is held in memory and dies with the container. It has to go to the database -
+not to a volume on this instance, which is disposable by design and takes the keys with it.
+See PACKAGING.md R36. If sign-ins survive a `docker compose up -d --force-recreate app`, it
+is working.
 
 ### Cost
 
