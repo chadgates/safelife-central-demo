@@ -851,13 +851,121 @@ very expensive wrong answer.
 
 ---
 
+## Pause and resume — going away for a while
+
+Teardown below removes everything. That is the wrong tool for a holiday, because it also
+releases the Elastic IP, and **you will not get that address back** — it returns to
+Exoscale's pool. The address is the one thing in this stack that is meant to be permanent:
+it is what the devices are given and what `sos.safelife.ch` resolves to.
+
+So pause instead. Destroy what costs money, keep what is irreplaceable or free:
+
+| | |
+|---|---|
+| **Destroy** | the instance and the database — together, nearly all of the bill |
+| **Keep** | the Elastic IP (irreplaceable, about CHF 10/month) |
+| **Keep** | the security group with its SSH rules, and the SSH key — both free |
+
+That takes about CHF 68/month down to about CHF 10, and leaves DNS untouched, so nothing
+at the registrar needs changing when you pause or when you come back.
+
+### Back up first
+
+The instance is disposable, but two things on it are not. Credentials live only in
+`deploy/app.env` locally and `/etc/safelife/app.env` on the host — and the host is about to
+disappear:
+
+```zsh
+BK=~/safelife-pause-$(date +%Y%m%d)
+mkdir -p $BK
+
+cp $REPO/deploy/app.env $BK/app.env.backup
+chmod 600 $BK/app.env.backup
+
+# The data. Adjust the table list if the real application has more than the demo's one.
+set -a; . $REPO/deploy/app.env; set +a
+export PGSSLMODE=require
+psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" \
+  -c "\copy (select * from messages order by 1) to '$BK/messages.csv' with csv header"
+```
+
+`pg_dump` is the better tool but frequently refuses here: Homebrew ships v14 while the
+managed server runs v17, and it aborts on the version mismatch rather than doing its best.
+Either install a matching client (`brew install postgresql@17`) or use `\copy` per table as
+above, which any client version handles.
+
+### Pause
+
+Targeted destroy — the only legitimate use of `-target`, and OpenTofu will warn about it:
+
+```zsh
+cd $REPO/infra
+
+$TF plan -destroy \
+  -target='exoscale_compute_instance.app' \
+  -target='exoscale_dbaas.pg[0]' \
+  -out=pause.tfplan
+
+# Read it before applying. It must say exactly: 0 to add, 0 to change, 2 to destroy.
+$TF apply pause.tfplan
+```
+
+Verify against the account rather than the Terraform outputs, which still show the old
+instance IP until the next refresh:
+
+```zsh
+exo compute instance list        # empty
+exo dbaas list                   # empty
+exo compute elastic-ip list      # the address is still here - this is the one that matters
+```
+
+### Resume
+
+```zsh
+cd $REPO/infra
+$TF apply                        # new instance, new database, EIP re-attached automatically
+```
+
+The Elastic IP needs no thought: `compute.tf` holds `elastic_ip_ids`, so Terraform binds it
+to the new instance. DNS still points at it, so `sos.safelife.ch` is correct the moment the
+instance answers.
+
+**The database credentials will have changed, and this is the step that catches people.** A
+new DBaaS instance gets a new hostname — the UUID embedded in it is freshly generated — and
+a new password. The old values in `app.env` are now wrong:
+
+```zsh
+$TF output -raw connection_string_dotnet      # the new ConnectionStrings__SafeLife
+```
+
+Put that in `$REPO/deploy/app.env`, along with the matching `PGHOST` / `PGPASSWORD` if the
+demo container is still in use, then ship it:
+
+```zsh
+cd $REPO
+export APPIP=$($TF -chdir=infra output -raw instance_ip)
+./tools/deploy.sh --env
+```
+
+Three things to expect on the first run back:
+
+- **The database is empty.** Restore `messages.csv` only if those rows still matter.
+- **Caddy re-issues the certificate.** Automatic, and DNS is already right. It counts
+  against Let's Encrypt's five-per-domain-per-week limit, which only bites if you pause and
+  resume repeatedly in one week.
+- **Your own IP may have moved** while you were away. `admin_cidrs` in `terraform.tfvars`
+  has to contain wherever you are now, or the SSH step times out with no useful error.
+  Check with `curl -s https://ifconfig.me` and add it before `$TF apply`.
+
+---
+
 ## Teardown
 
 If you used Terraform, that is the whole teardown — and it removes everything it made,
 which is the main reason to have used it:
 
 ```zsh
-cd $REPO/infra && terraform destroy
+cd $REPO/infra && $TF destroy
 ```
 
 Otherwise, by hand. **Order matters** — a security group cannot be deleted while an instance

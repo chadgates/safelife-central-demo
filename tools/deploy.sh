@@ -2,7 +2,7 @@
 #
 # Deploy from here, because GitHub cannot.
 #
-# The security group allows SSH from one address - yours - so a GitHub runner cannot reach
+# The security group allows SSH only from the addresses in admin_cidrs, so a GitHub runner cannot reach
 # the instance. This does everything the deploy workflow would have: ships the compose files,
 # pins the image tag, pulls, optionally migrates, restarts, and checks the result.
 #
