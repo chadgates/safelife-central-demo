@@ -17,6 +17,19 @@ resource "exoscale_security_group_rule" "ssh" {
   end_port          = 22
 }
 
+# The vendor's deploy access. Separate resource so it never reaches database.tf's ip_filter.
+resource "exoscale_security_group_rule" "ssh_deploy" {
+  for_each = toset(var.deploy_cidrs)
+
+  security_group_id = exoscale_security_group.app.id
+  description       = "vendor deploy ssh"
+  type              = "INGRESS"
+  protocol          = "TCP"
+  cidr              = each.value
+  start_port        = 22
+  end_port          = 22
+}
+
 # 80 is not optional even once TLS is on: Caddy needs it for the ACME HTTP-01 challenge
 # and for the redirect to HTTPS.
 resource "exoscale_security_group_rule" "http" {

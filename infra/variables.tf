@@ -10,6 +10,21 @@ variable "name" {
   default     = "safelife"
 }
 
+variable "deploy_cidrs" {
+  description = <<-EOT
+    Addresses allowed to SSH as the vendor's `deploy` user. Deliberately separate from
+    admin_cidrs: admin_cidrs also feeds the database ip_filter, and the vendor has no
+    business reaching Postgres directly. SSH only.
+  EOT
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for c in var.deploy_cidrs : can(cidrnetmask(c))])
+    error_message = "deploy_cidrs must be valid CIDRs, e.g. [\"203.0.113.10/32\"]."
+  }
+}
+
 variable "admin_cidrs" {
   description = <<-EOT
     Addresses allowed to reach SSH and the database directly, in CIDR form.
